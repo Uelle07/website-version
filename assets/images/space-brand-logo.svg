@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 100" width="420" height="100">
+  <defs>
+    <!-- Planet Gradient -->
+    <radialGradient id="planetGrad" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="35%" stop-color="#00c2a8" />
+      <stop offset="70%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </radialGradient>
+
+    <!-- Ring Gradient -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00c2a8" stop-opacity="0.95" />
+      <stop offset="50%" stop-color="#c084fc" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- Premium White-to-Icy-Blue Text Gradient -->
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="35%" stop-color="#F8FCFF" />
+      <stop offset="70%" stop-color="#DCEEFF" />
+      <stop offset="100%" stop-color="#9FD8FF" />
+    </linearGradient>
+
+    <!-- Accent Dot Gradient -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00c2a8" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(10, 0)">
+    <!-- 1. PLANET ICON (Left) -->
+    <g transform="translate(50, 50) rotate(-22)">
+      <!-- Back Saturn Ring -->
+      <ellipse cx="0" cy="0" rx="44" ry="12" fill="none" stroke="url(#ringGrad)" stroke-width="3.5" stroke-linecap="round" opacity="0.45" />
+
+      <!-- Main Planet Sphere -->
+      <circle cx="0" cy="0" r="26" fill="url(#planetGrad)" />
+
+      <!-- Highlighting Arc -->
+      <path d="M -18 -18 A 24 24 0 0 1 18 -18" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.25" stroke-linecap="round" />
+
+      <!-- Front Saturn Ring -->
+      <path d="M -44 0 A 44 12 0 0 0 44 0" fill="none" stroke="url(#ringGrad)" stroke-width="4" stroke-linecap="round" />
+
+      <!-- Orbital Accents -->
+      <circle cx="-32" cy="-14" r="1.5" fill="#38bdf8" opacity="0.9" />
+      <circle cx="36" cy="12" r="1.8" fill="#c084fc" opacity="0.9" />
+    </g>
+
+    <!-- 2. BRAND TEXT "SPACE" (Right) -->
+    <text x="112" y="62" font-family="'Inter', 'Poppins', 'Segoe UI', sans-serif" font-weight="800" font-size="46" letter-spacing="6" fill="url(#textGrad)">SPACE</text>
+
+    <!-- Futuristic Tech Dot Accent -->
+    <circle cx="372" cy="56" r="4.5" fill="url(#accentGrad)" />
+  </g>
+</svg>

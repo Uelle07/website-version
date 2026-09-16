@@ -1,0 +1,610 @@
+/* =========================================================
+   style.css (Updated: Sidebar Removed & Full-Width Layout)
+   ========================================================= */
+
+:root {
+    /* Brand palette — deep cooperative green + warm gold accent */
+    --coop-green:        #2F5233;
+    --coop-green-dark:   #203A24;
+    --coop-green-light:  #E7EFE7;
+    --coop-gold:         #C9A227;
+    --coop-gold-light:   #F6EDCF;
+
+    /* Neutrals */
+    --coop-bg:           #F6F5F1;
+    --coop-surface:      #FFFFFF;
+    --coop-border:       #E3E0D8;
+    --coop-text:         #1F2A24;
+    --coop-text-muted:   #6B7570;
+
+    /* Layout */
+    --navbar-height:     64px;
+    --radius:            10px;
+}
+
+body:not(.portal-body) {
+    background-color: var(--coop-bg);
+    color: var(--coop-text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+h1, h2, h3, h4, h5, .brand-font {
+    font-family: 'Poppins', 'Inter', sans-serif;
+    font-weight: 700;
+    color: var(--coop-green-dark);
+}
+
+a {
+    color: var(--coop-green);
+}
+a:hover {
+    color: var(--coop-green-dark);
+}
+
+/* ---------------------------------------------------------
+   Top navbar
+   --------------------------------------------------------- */
+.app-navbar {
+    background-color: var(--coop-surface);
+    border-bottom: 1px solid var(--coop-border);
+    height: var(--navbar-height);
+    padding: 0 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 1050;
+}
+
+.app-navbar .navbar-brand {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 700;
+    color: var(--coop-green-dark);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.app-navbar .user-menu-btn {
+    border: 1px solid var(--coop-border);
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
+    background: var(--coop-bg);
+    color: var(--coop-text);
+}
+
+/* ---------------------------------------------------------
+   App layout shell: Full-Width Content (Sidebar Removed)
+   --------------------------------------------------------- */
+.app-layout {
+    display: block;
+    min-height: calc(100vh - var(--navbar-height));
+}
+
+/* Tuluyang tinanggal ang sidebar */
+.app-sidebar, .sidebar-toggle {
+    display: none !important;
+}
+
+.app-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+/* ---------------------------------------------------------
+   Cards, panels, tables
+   --------------------------------------------------------- */
+.card {
+    border: 1px solid var(--coop-border);
+    border-radius: var(--radius);
+}
+
+.card-header {
+    background-color: var(--coop-green-light);
+    border-bottom: 1px solid var(--coop-border);
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    color: var(--coop-green-dark);
+}
+
+.btn-primary {
+    background-color: var(--coop-green);
+    border-color: var(--coop-green);
+}
+.btn-primary:hover,
+.btn-primary:focus {
+    background-color: var(--coop-green-dark);
+    border-color: var(--coop-green-dark);
+}
+
+.btn-outline-primary {
+    color: var(--coop-green);
+    border-color: var(--coop-green);
+}
+.btn-outline-primary:hover {
+    background-color: var(--coop-green);
+    border-color: var(--coop-green);
+}
+
+.badge-gold {
+    background-color: var(--coop-gold-light);
+    color: var(--coop-green-dark);
+    border: 1px solid var(--coop-gold);
+}
+
+/* ---------------------------------------------------------
+   Auth pages (login)
+   --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   Login page (aurora / space theme) — scoped under
+   .login-body so these rules never leak into the rest
+   of the app, which still uses the plain green/gold theme.
+   --------------------------------------------------------- */
+.login-body {
+    margin: 0;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: #090314;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    position: relative;
+    padding: 30px;
+    overflow-x: hidden;
+}
+
+.login-body #bg-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.login-body .top-page-logo {
+    position: absolute;
+    top: 30px; left: 45px;
+    z-index: 10;
+    display: block;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.login-body .top-page-logo img {
+    height: 60px;
+    width: auto;
+    max-width: 280px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 16px rgba(0, 194, 168, 0.45));
+    display: block;
+}
+
+.login-body .page-container {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 1200px;
+    min-height: 600px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 30px;
+}
+
+.login-body .login-panel {
+    background-color: #fff;
+    border-radius: 24px;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.6), 0 0 35px rgba(170,0,255,0.25);
+    overflow: hidden;
+    display: flex;
+    width: 100%;
+    min-height: 600px;
+}
+
+.login-body .info-panel {
+    flex: 1.1;
+    background:
+        radial-gradient(circle at 0% 0%, rgba(0,230,118,0.85) 0%, rgba(0,230,118,0) 50%),
+        radial-gradient(circle at 100% 100%, rgba(170,0,255,0.9) 0%, rgba(170,0,255,0) 55%),
+        linear-gradient(135deg, #004d40 0%, #1a0033 50%, #4a0072 100%);
+    padding: 70px 55px;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.login-body .info-panel h1 {
+    font-size: 46px;
+    font-weight: 800;
+    margin: 8px 0 14px;
+    background: linear-gradient(90deg, #ffffff, #e0f2f1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #fff;
+}
+
+.login-body .sub-text-bold { color: #a7ffeb; font-weight: 700; margin-bottom: 22px; }
+.login-body .description-text { line-height: 1.6; opacity: 0.95; }
+
+.login-body .form-panel {
+    flex: 1.3;
+    padding: 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background-color: #fff;
+}
+
+.login-body .form-panel h2 {
+    font-size: 38px;
+    font-weight: 800;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #4a0072 0%, #00897b 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.login-body .subtitle { color: #555; margin-bottom: 25px; }
+.login-body .hint-text { color: #777; font-size: 13px; margin: -12px 0 18px; }
+
+/* ---------------------------------------------------------
+   Login Error & Alert Box Styling
+   --------------------------------------------------------- */
+.login-body .error-message,
+.login-body .alert-danger {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 22px;
+    background-color: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+    border-left: 5px solid #ef4444;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.12);
+}
+
+.login-body .error-message i,
+.login-body .alert-danger i {
+    font-size: 1.25rem;
+    color: #ef4444;
+    flex-shrink: 0;
+}
+
+.login-body .alert-success {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 22px;
+    background-color: #ecfdf5;
+    color: #059669;
+    border: 1px solid #6ee7b7;
+    border-left: 5px solid #10b981;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.12);
+}
+
+.login-body .alert-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 22px;
+    background-color: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #93c5fd;
+    border-left: 5px solid #3b82f6;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12);
+}
+
+.login-body .alert-warning {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 22px;
+    background-color: #fffbeb;
+    color: #d97706;
+    border: 1px solid #fde68a;
+    border-left: 5px solid #f59e0b;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.12);
+}
+
+.login-body .form-group { margin-bottom: 22px; }
+.login-body .form-group label { display: block; font-weight: 700; margin-bottom: 8px; color: #1a1a1a; }
+
+.login-body .form-control {
+    width: 100%;
+    height: 56px;
+    box-sizing: border-box;
+    padding: 0 18px;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    font-size: 16px;
+    background-color: #fafafa;
+    transition: all 0.25s ease;
+    display: block;
+}
+.login-body #password {
+    padding-right: 2.75rem;
+}
+.login-body .form-control:focus {
+    outline: none;
+    border-color: #4a0072;
+    box-shadow: 0 0 0 5px rgba(74,0,114,0.12);
+    background-color: #fff;
+}
+
+.login-body .form-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+.login-body .btn-login {
+    background: linear-gradient(135deg, #4a0072 0%, #00897b 100%);
+    color: #fff;
+    border: none;
+    padding: 15px 42px;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 6px 20px rgba(74,0,114,0.35);
+}
+.login-body .btn-login:hover {
+    background: linear-gradient(135deg, #00e676 0%, #aa00ff 100%);
+    transform: translateY(-2px);
+}
+
+@media (max-width: 900px) {
+    .login-body .top-page-logo { position: relative; top: 0; left: 0; margin-bottom: 20px; display: inline-block; }
+    .login-body .top-page-logo img { height: 80px; width: 80px; }
+    .login-body .page-container { margin-top: 0; }
+    .login-body .login-panel { flex-direction: column; min-height: auto; }
+    .login-body .info-panel, .login-body .form-panel { padding: 45px 30px; }
+}
+
+/* ---------------------------------------------------------
+   Custom Modal Overlay & Card System
+   --------------------------------------------------------- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(8, 3, 19, 0.82);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1.5rem;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+}
+
+.modal-overlay.hidden {
+  display: none !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.modal-card {
+  background: #141423;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 460px;
+  padding: 1.75rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 194, 168, 0.15);
+  transform: scale(1);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-overlay.hidden .modal-card {
+  transform: scale(0.92);
+}
+
+.modal-header {
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.75rem;
+}
+
+.modal-header h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modal-body {
+  padding: 0.5rem 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 1rem;
+}
+
+/* ---------------------------------------------------------
+   Footer
+   --------------------------------------------------------- */
+.app-footer {
+    background: var(--nav-bg, rgba(10, 16, 38, 0.72));
+    border-top: 1px solid var(--nav-border, rgba(255, 255, 255, 0.1));
+    color: var(--text-dim, #94a3b8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ---------------------------------------------------------
+   Portal Flash & Toast Notifications (3D Glassmorphic)
+   --------------------------------------------------------- */
+.portal-flash-container, .portal-toast-container {
+    position: fixed;
+    top: 5.5rem;
+    right: 1.5rem;
+    z-index: 999999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    pointer-events: none;
+    max-width: 420px;
+    width: calc(100% - 3rem);
+}
+
+@media (max-width: 640px) {
+    .portal-flash-container, .portal-toast-container {
+        top: 4.5rem;
+        right: 1rem;
+        left: 1rem;
+        width: auto;
+        max-width: 100%;
+    }
+}
+
+.portal-toast {
+    pointer-events: auto;
+    background: rgba(13, 20, 44, 0.94);
+    backdrop-filter: blur(22px) saturate(190%);
+    -webkit-backdrop-filter: blur(22px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 242, 254, 0.2);
+    color: #ffffff;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    animation: slideInToast 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+@keyframes slideInToast {
+    from { opacity: 0; transform: translateX(40px) scale(0.94); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.portal-toast.toast-hiding {
+    opacity: 0;
+    transform: translateX(40px) scale(0.92);
+}
+
+.toast-icon-wrapper {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+
+.portal-toast-success .toast-icon-wrapper {
+    background: rgba(16, 185, 129, 0.18);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.portal-toast-error .toast-icon-wrapper {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.portal-toast-warning .toast-icon-wrapper {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.portal-toast-info .toast-icon-wrapper {
+    background: rgba(0, 242, 254, 0.15);
+    color: #00f2fe;
+    border: 1px solid rgba(0, 242, 254, 0.35);
+}
+
+.toast-content {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.toast-title {
+    font-size: 0.92rem;
+    font-weight: 800;
+    margin: 0 0 0.2rem 0;
+    line-height: 1.2;
+    color: #ffffff;
+}
+
+.toast-message {
+    font-size: 0.84rem;
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.toast-close-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.2rem;
+    font-size: 0.95rem;
+    margin-left: 0.5rem;
+    transition: color 0.2s ease;
+    line-height: 1;
+}
+
+.toast-close-btn:hover {
+    color: #ffffff;
+}
+
+.toast-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+    width: 100%;
+    transform-origin: left;
+    transition: width 0.1s linear;
+}
+

@@ -1,0 +1,8 @@
+# Defense-in-depth: even though config/upload.php only accepts
+# JPG/PNG (verified by real MIME type, not just the extension),
+# this stops the uploads folder from ever executing PHP if that
+# check is ever bypassed or misconfigured.
+<FilesMatch "\.(php|phtml|php3|php4|php5|phar)$">
+    Require all denied
+</FilesMatch>
+Options -Indexes

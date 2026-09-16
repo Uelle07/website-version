@@ -1,0 +1,26 @@
+# =========================================================
+# SPACE Cooperative Member Information System
+# Web Server Configuration for Apache / InfinityFree
+# =========================================================
+
+# 1. Disable directory browsing
+Options -Indexes
+
+# 2. Set default index file
+DirectoryIndex index.php login.php
+
+# 3. Set default character encoding
+AddDefaultCharset UTF-8
+
+# 4. Protect sensitive files from direct web access
+<FilesMatch "(^\.|\.(sql|log|md|ini|env|json|bak|config)$)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 5. Prevent execution of scripts in uploads directory (reinforced at root)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} ^/uploads/.*\.php$ [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
