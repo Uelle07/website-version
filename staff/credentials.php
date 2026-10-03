@@ -271,7 +271,7 @@ window.triggerReset = function(docId, accNo) {
 
 async function performReset(docId, accNo) {
     try {
-        await updateDoc(doc(db, 'members', docId), {
+        await updateDoc(doc(db, 'member', docId), {
             first_login: true,
             password_changed: false
         });
