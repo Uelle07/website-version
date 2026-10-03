@@ -85,11 +85,8 @@ $pageTitle = $pageTitle ?? 'Staff Portal';
         <div class="admin-user-dropdown-container">
           <button class="user-menu-btn" id="adminUserDropdownBtn" type="button" onclick="toggleAdminUserMenu(event)" aria-expanded="false" aria-label="Administrator Menu">
             <div class="user-avatar-sm">
-              <?php if (!empty($_SESSION['profile_photo'])): ?>
-                <img src="<?= e(photo_url($_SESSION['profile_photo'])) ?>" alt="Admin Avatar" class="top-nav-avatar-img">
-              <?php else: ?>
-                <i class="fa-solid fa-user-tie"></i>
-              <?php endif; ?>
+              <img id="admin-avatar-img" src="" alt="Admin Avatar" class="top-nav-avatar-img" style="display: none;">
+              <i class="fa-solid fa-user-tie" id="admin-avatar-icon"></i>
             </div>
             <span class="user-name">System Administrator</span>
             <i class="fa-solid fa-chevron-down caret-icon" id="adminDropdownCaret"></i>

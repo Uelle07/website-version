@@ -2,50 +2,11 @@
 /**
  * staff/credentials.php
  * -------------------------------------------------------
- * Staff Portal — Member Password Management View (Database Integrated).
+ * Staff Portal — Member Password Management View (Firebase Integrated).
  * -------------------------------------------------------
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_staff();
-
-// Handle Password Reset request
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_password') {
-    verify_csrf($_POST['csrf_token'] ?? '');
-    $targetId = (int) ($_POST['member_id'] ?? 0);
-
-    $stmt = $pdo->prepare("SELECT m.member_id, m.account_number, m.firstname, m.lastname FROM member m WHERE m.member_id = ?");
-    $stmt->execute([$targetId]);
-    $mem = $stmt->fetch();
-
-    if ($mem) {
-        // Reset password to default (matches account_number rule)
-        $defaultPassword = $mem['account_number'];
-        $newHash = password_hash($defaultPassword, PASSWORD_DEFAULT);
-
-        $up = $pdo->prepare("UPDATE member_account SET password = ?, first_login = TRUE, password_changed = FALSE WHERE member_id = ?");
-        $up->execute([$newHash, $targetId]);
-
-        // Log reset into update_history
-        $hist = $pdo->prepare(
-            "INSERT INTO update_history (member_id, updated_by_staff_id, update_type, remarks)
-             VALUES (?, ?, 'Password Reset', 'Staff reset member password to default account number.')"
-        );
-        $hist->execute([$targetId, current_user_id()]);
-
-        set_flash('success', 'Password reset successfully for Account ' . $mem['account_number'] . ' (Default password: ' . $defaultPassword . ').');
-        redirect('staff/credentials.php');
-    }
-}
-
-// Fetch member accounts with member details
-$stmt = $pdo->query(
-    "SELECT ma.*, m.account_number, m.firstname, m.lastname, m.created_at AS member_created_at
-     FROM member_account ma
-     JOIN member m ON m.member_id = ma.member_id
-     ORDER BY m.created_at DESC"
-);
-$credentials = $stmt->fetchAll();
 
 $pageTitle = 'Password Management';
 require_once __DIR__ . '/../pages/header_staff.php';
@@ -219,57 +180,107 @@ require_once __DIR__ . '/../pages/header_staff.php';
           <th style="text-align: center;">Actions</th>
         </tr>
       </thead>
-      <tbody>
-        <?php if (!empty($credentials)): ?>
-          <?php foreach ($credentials as $c): ?>
-            <?php
-              $fullName   = trim($c['firstname'] . ' ' . $c['lastname']);
-              $accNo      = $c['account_number'];
-              $isDefault  = (bool) $c['first_login'];
-              $lastChange = $c['password_changed'] ? format_date($c['last_login'] ?? $c['member_created_at'], 'm/d/Y') : 'None';
-              $statusTag  = $isDefault ? 'temp' : 'active';
-            ?>
-            <tr data-status="<?= e($statusTag) ?>">
-              <td><strong class="account-tag"><?= e($accNo) ?></strong></td>
-              <td>
-                <div class="user-meta-cell">
-                  <span class="member-fullname"><?= e($fullName) ?></span>
-                </div>
-              </td>
-              <td><?= e($lastChange) ?></td>
-              <td style="text-align: center;">
-                <?php if ($isDefault): ?>
-                  <span class="status-pill status-default">Default Password</span>
-                <?php else: ?>
-                  <span class="status-pill status-active">Active</span>
-                <?php endif; ?>
-              </td>
-              <td style="text-align: center;">
-                <?php if ($isDefault): ?>
-                  <button type="button" class="btn btn-secondary btn-sm" disabled style="opacity: 0.45; cursor: not-allowed; pointer-events: none;" title="Password is already set to default account credential">
-                    <i class="fa-solid fa-key"></i> Reset Password
-                  </button>
-                <?php else: ?>
-                  <form method="post" style="display:inline-block;" id="resetPwdForm_<?= e($c['member_id']) ?>">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="reset_password">
-                    <input type="hidden" name="member_id" value="<?= e($c['member_id']) ?>">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="showSystemConfirm({ title: 'Reset Member Password', message: 'Are you sure you want to reset the password for <?= e(addslashes($accNo)) ?> to default?', confirmText: 'Yes, Reset', isDanger: true, onConfirm: () => document.getElementById('resetPwdForm_<?= e($c['member_id']) ?>').submit() });">
-                      <i class="fa-solid fa-key"></i> Reset Password
-                    </button>
-                  </form>
-                <?php endif; ?>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        <?php else: ?>
-          <tr>
-            <td colspan="5" class="text-center text-muted py-4">No member credentials found in database.</td>
-          </tr>
-        <?php endif; ?>
+      <tbody id="credentialsTableBody">
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">Loading credentials...</td>
+        </tr>
       </tbody>
     </table>
   </div>
 </div>
 
 <?php require_once __DIR__ . '/../pages/footer_staff.php'; ?>
+
+<script type="module">
+import { app, db, auth } from '../assets/js/firebase-init.js';
+import { collection, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../login.php';
+        return;
+    }
+    loadCredentials();
+});
+
+async function loadCredentials() {
+    const tbody = document.getElementById('credentialsTableBody');
+    try {
+        const snapshot = await getDocs(collection(db, 'member'));
+        if (snapshot.empty) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No member credentials found in database.</td></tr>';
+            return;
+        }
+
+        let html = '';
+        snapshot.forEach(docSnap => {
+            const c = docSnap.data();
+            const fullName = `${c.firstname || ''} ${c.lastname || ''}`.trim();
+            const accNo = c.account_number || 'Unknown';
+            const isDefault = c.first_login !== false; // assuming true if not set explicitly
+            const lastChange = isDefault ? 'None' : (c.last_login ? new Date(c.last_login.toMillis ? c.last_login.toMillis() : c.last_login).toLocaleDateString() : 'Unknown');
+            const statusTag = isDefault ? 'temp' : 'active';
+            const docId = docSnap.id;
+
+            html += `
+            <tr data-status="${statusTag}">
+              <td><strong class="account-tag">${accNo}</strong></td>
+              <td>
+                <div class="user-meta-cell">
+                  <span class="member-fullname">${fullName}</span>
+                </div>
+              </td>
+              <td>${lastChange}</td>
+              <td style="text-align: center;">
+                ${isDefault 
+                  ? '<span class="status-pill status-default">Default Password</span>' 
+                  : '<span class="status-pill status-active">Active</span>'}
+              </td>
+              <td style="text-align: center;">
+                ${isDefault
+                  ? `<button type="button" class="btn btn-secondary btn-sm" disabled style="opacity: 0.45; cursor: not-allowed; pointer-events: none;" title="Password is already set to default account credential">
+                      <i class="fa-solid fa-key"></i> Reset Password
+                    </button>`
+                  : `<button type="button" class="btn btn-secondary btn-sm" onclick="triggerReset('${docId}', '${accNo}')">
+                      <i class="fa-solid fa-key"></i> Reset Password
+                    </button>`}
+              </td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+    } catch (error) {
+        console.error("Error loading credentials:", error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Error loading data.</td></tr>';
+    }
+}
+
+window.triggerReset = function(docId, accNo) {
+    if (typeof showSystemConfirm === 'function') {
+        showSystemConfirm({
+            title: 'Reset Member Password',
+            message: `Are you sure you want to reset the password for ${accNo} to default?`,
+            confirmText: 'Yes, Reset',
+            isDanger: true,
+            onConfirm: () => performReset(docId, accNo)
+        });
+    } else if (confirm(`Are you sure you want to reset the password for ${accNo} to default?`)) {
+        performReset(docId, accNo);
+    }
+};
+
+async function performReset(docId, accNo) {
+    try {
+        await updateDoc(doc(db, 'members', docId), {
+            first_login: true,
+            password_changed: false
+        });
+        alert(`Password reset successfully for Account ${accNo}.`);
+        loadCredentials();
+    } catch (error) {
+        console.error("Error resetting password:", error);
+        alert("Failed to reset password.");
+    }
+}
+</script>
+

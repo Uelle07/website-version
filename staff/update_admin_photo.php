@@ -33,17 +33,12 @@ if (!verify_csrf_token($csrfToken)) {
     redirect("staff/dashboard.php");
 }
 
-$staffId = current_user_id();
+$staffId = $_POST['staff_id'] ?? current_user_id();
 $action  = $_POST["action"] ?? "upload";
-
-// Fetch current photo
-$currStmt = $pdo->prepare("SELECT profile_photo FROM staff WHERE staff_id = ?");
-$currStmt->execute([$staffId]);
-$currentPhoto = $currStmt->fetchColumn();
+$currentPhoto = $_POST['current_photo'] ?? null;
 
 if ($action === "remove") {
-    $stmt = $pdo->prepare("UPDATE staff SET profile_photo = NULL WHERE staff_id = ?");
-    $stmt->execute([$staffId]);
+    // Database update moved to Firebase client-side.
     $_SESSION["profile_photo"] = null;
 
     if (!empty($currentPhoto)) {
@@ -85,8 +80,8 @@ if (!$uploadResult["success"]) {
 }
 
 $photoFilename = $uploadResult["filename"];
-$stmt = $pdo->prepare("UPDATE staff SET profile_photo = ? WHERE staff_id = ?");
-$stmt->execute([$photoFilename, $staffId]);
+
+// Database update moved to Firebase client-side.
 
 if (!empty($currentPhoto) && $currentPhoto !== $photoFilename) {
     delete_uploaded_photo($currentPhoto);
@@ -98,7 +93,7 @@ if ($isAjax) {
     header("Content-Type: application/json");
     echo json_encode([
         "success"   => true,
-        "message"   => "Profile photo updated successfully.",
+        "message"   => "Profile photo uploaded successfully.",
         "filename"  => $photoFilename,
         "photo_url" => photo_url($photoFilename)
     ]);

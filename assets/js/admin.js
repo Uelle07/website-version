@@ -10,7 +10,7 @@
 let showingPastInfo = false;
 let printingTargetAcc = '';
 let currentPhotoAcc = '';
-let membersDatabase = {};
+window.membersDatabase = window.membersDatabase || {};
 let activeAuditAccNo = '';
 let activeAuditAction = '';
 let activeAuditRemarks = '';
@@ -26,7 +26,10 @@ async function fetchMembersFromDatabase() {
       console.warn('Backend not connected yet. Running in offline/mock mode.');
       return;
     }
-    membersDatabase = await response.json();
+    const fetchedData = await response.json();
+    if (fetchedData && Object.keys(fetchedData).length > 0) {
+      window.membersDatabase = fetchedData;
+    }
   } catch (error) {
     console.warn("Database sync notice:", error.message);
   }
@@ -313,6 +316,7 @@ function validateAddMemberForm() {
   const fn = (document.getElementById('addFirstName')?.value || '').trim();
   const ln = (document.getElementById('addLastName')?.value || '').trim();
   const civil = (document.getElementById('addCivilStatus')?.value || 'Single').trim();
+  const email = (document.getElementById('addEmail')?.value || '').trim();
 
   if (!fn || !ln) {
     if (errBox) {
@@ -322,6 +326,15 @@ function validateAddMemberForm() {
     return false;
   }
 
+  
+  const emailRegex = /^(?!\d+@)[^\s_]+@[^\s_]+\.com$/;
+  if (email && !emailRegex.test(email)) {
+    if (errBox) {
+      errBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <strong>Validation Error:</strong> Invalid Email Address. Underscores are not allowed, prefix cannot be numbers only, and it must end with .com.';
+      errBox.classList.remove('hidden');
+    }
+    return false;
+  }
   if (/\d/.test(fn) || /\d/.test(ln)) {
     if (errBox) {
       errBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <strong>Validation Error:</strong> First Name and Last Name cannot contain numbers.';
@@ -340,9 +353,13 @@ function promptConfirmAddMember() {
 
 function executeAddMemberSubmit() {
   closeModal('confirmAddMemberModal');
-  const form = document.getElementById('addMemberForm');
-  if (form) {
-    form.submit();
+  if (typeof window.executeAddMemberFirebase === 'function') {
+    window.executeAddMemberFirebase();
+  } else {
+    const form = document.getElementById('addMemberForm');
+    if (form) {
+      form.submit();
+    }
   }
 }
 
@@ -494,6 +511,29 @@ function handleSigUpload(event) {
   }
 }
 
+function handleEditPhotoUpload(event) {
+  const file = event.target.files[0];
+  const previewSlot = document.getElementById('editPhotoPreviewSlot');
+  if (file) {
+    if (file.size > 5 * 1024 * 1024) {
+      if (typeof showToast === 'function') showToast('error', 'File Too Large', 'Photo image must be 5 MB or smaller.');
+      event.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      if (previewSlot) {
+        previewSlot.innerHTML = `<div style="margin-top: 0.35rem;"><span style="color: #34d399; font-size: 0.8rem; display: block; margin-bottom: 2px;"><i class="fa-solid fa-check-circle"></i> New Photo Ready:</span><img src="` + e.target.result + `" alt="New Photo" style="height: 42px; background: #fff; padding: 2px; border-radius: 4px; border: 1px solid #cbd5e1; vertical-align: middle;"></div>`;
+      }
+    };
+    reader.readAsDataURL(file);
+  } else {
+    if (previewSlot) {
+      previewSlot.innerHTML = `<span style="color: var(--text-muted);">No new photo selected</span>`;
+    }
+  }
+}
+
 function handleEditSigUpload(event) {
   const file = event.target.files[0];
   const previewSlot = document.getElementById('editSigPreviewSlot');
@@ -581,9 +621,9 @@ function openPhotoModal(accNoOrUrl) {
     photoUrl = accNoOrUrl;
   } else {
     const accNo = String(accNoOrUrl || '').trim();
-    const member = membersDatabase[accNo] || {};
+    const member = window.membersDatabase[accNo] || {};
     if (member.passport_photo && !member.passport_photo.includes('default-avatar')) {
-      photoUrl = member.passport_photo.startsWith('http') || member.passport_photo.startsWith('/') ? member.passport_photo : (window.BASE_URL ? window.BASE_URL + '/' + member.passport_photo : member.passport_photo);
+      photoUrl = member.passport_photo.startsWith('http') || member.passport_photo.startsWith('/') || member.passport_photo.startsWith('data:') ? member.passport_photo : (window.BASE_URL ? window.BASE_URL + '/' + member.passport_photo : member.passport_photo);
     } else {
       // Look for thumbnail inside table row if available
       const tableRows = document.querySelectorAll('tr');
@@ -619,7 +659,7 @@ function openPhotoModal(accNoOrUrl) {
 
 // ================= 7C. VIEW MEMBER MODAL (RESTRUCTURED 2x2 & GRID) =================
 function viewMember(accNo) {
-  const data = membersDatabase[accNo] || {
+  const data = window.membersDatabase[accNo] || {
     accNo: accNo, fullName: 'Unknown', civilStatus: 'Single', spouseName: 'Not Specified', childrenList: [], contact: 'N/A'
   };
   const setTxt = (id, txt) => {
@@ -630,7 +670,7 @@ function viewMember(accNo) {
   const name = data.fullName || data.name || 'Unknown';
   setTxt('viewAccNo', data.accNo || data.account_number || accNo);
   setTxt('viewName', name);
-  setTxt('viewAge', data.age ? (String(data.age).includes('Year') ? data.age : `${data.age} Years Old`) : (data.birthday ? `${data.birthday}` : 'N/A'));
+  setTxt('viewAge', data.birthday ? `${data.birthday}` : 'N/A');
   setTxt('viewCivil', data.civilStatus || data.civil || 'Single');
   setTxt('viewMemberSex', data.sex || 'Not Specified');
   setTxt('viewContact', data.contact_number || data.contact || 'N/A');
@@ -664,10 +704,13 @@ function viewMember(accNo) {
     }
   }
 
+  let hasFamilyInfo = false;
   // Parents Information
   const parentsBox = document.getElementById('viewParentsBox');
   const father = (data.father_name && data.father_name.trim() && data.father_name !== 'Not Specified') ? data.father_name : 'Not Specified';
   const mother = (data.mother_name && data.mother_name.trim() && data.mother_name !== 'Not Specified') ? data.mother_name : 'Not Specified';
+  
+  if (father !== 'Not Specified' || mother !== 'Not Specified') hasFamilyInfo = true;
 
   if (parentsBox) {
     parentsBox.innerHTML = `
@@ -756,7 +799,7 @@ function viewMember(accNo) {
 
 // ================= 8. EDIT MEMBER WORKFLOW =================
 function openEditMember(accNo) {
-  const data = membersDatabase[accNo] || {};
+  const data = window.membersDatabase[accNo] || {};
   const errBox = document.getElementById('editMemberError');
   if (errBox) errBox.classList.add('hidden');
 
@@ -936,6 +979,7 @@ function validateEditMemberForm() {
   const address = (document.getElementById('editAddress')?.value || '').trim();
   const sex = (document.getElementById('editSex')?.value || '').trim();
   const nationality = (document.getElementById('editNationality')?.value || '').trim();
+  const email = (document.getElementById('editEmail')?.value || '').trim();
   const errBox = document.getElementById('editMemberError');
 
   if (errBox) errBox.classList.add('hidden');
@@ -948,6 +992,15 @@ function validateEditMemberForm() {
     return false;
   }
 
+  
+  const emailRegex = /^(?!\d+@)[^\s_]+@[^\s_]+\.com$/;
+  if (email && !emailRegex.test(email)) {
+    if (errBox) {
+      errBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <strong>Validation Error:</strong> Invalid Email Address. Underscores are not allowed, prefix cannot be numbers only, and it must end with .com.';
+      errBox.classList.remove('hidden');
+    }
+    return false;
+  }
   if (/\d/.test(fn) || /\d/.test(ln)) {
     if (errBox) {
       errBox.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <strong>Validation Error:</strong> First Name and Last Name cannot contain numbers.';
@@ -974,7 +1027,7 @@ function executeEditMemberSubmit() {
 
 // ================= 9. DELETE MEMBER WORKFLOW =================
 function openDeleteMember(accNo) {
-  const data = membersDatabase[accNo] || { fullName: 'Member' };
+  const data = window.membersDatabase[accNo] || { fullName: 'Member' };
   const accHidden = document.getElementById('deleteAccNoHidden');
   if (accHidden) accHidden.value = accNo;
   const targetAcc = document.getElementById('deleteTargetAcc');
@@ -990,10 +1043,10 @@ function openDeleteMember(accNo) {
  * True Printing — Directly prints the complete, official member profile record.
  */
 async function printMemberRecord(accNo) {
-  if (!membersDatabase[accNo]) {
+  if (!window.membersDatabase[accNo]) {
     await fetchMembersFromDatabase();
   }
-  const member = membersDatabase[accNo] || {
+  const member = window.membersDatabase[accNo] || {
     account_number: accNo,
     fullName: accNo,
     name: accNo,
@@ -1300,7 +1353,7 @@ async function printMemberRecord(accNo) {
  * Opens download modal for direct PDF / Word file exports of Member Record.
  */
 function openDownloadMemberModal(accNo) {
-  const data = membersDatabase[accNo] || { fullName: accNo, name: accNo };
+  const data = window.membersDatabase[accNo] || { fullName: accNo, name: accNo };
   printingTargetAcc = accNo;
   const targetName = document.getElementById('printTargetName');
   if (targetName) {
@@ -1613,7 +1666,7 @@ function createSimplePdfBlob(title, subtitle, tableRows, metaText) {
 
 function confirmPrintAction() {
   const fmt = document.getElementById('printFormatSelect')?.value || 'PDF Document (.pdf)';
-  const member = membersDatabase[printingTargetAcc] || {
+  const member = window.membersDatabase[printingTargetAcc] || {
     fullName: printingTargetAcc,
     account_number: printingTargetAcc,
     civil: 'Single',
@@ -2044,7 +2097,7 @@ function openAuditDetailsModal(accNo, action, time, staff, remarks) {
   activeAuditAction = action;
   activeAuditRemarks = remarks || '';
 
-  const memberData = membersDatabase[accNo] || { fullName: accNo, name: accNo };
+  const memberData = window.membersDatabase[accNo] || { fullName: accNo, name: accNo };
   const setTxt = (id, txt) => {
     const el = document.getElementById(id);
     if (el) el.innerText = txt;
@@ -3333,3 +3386,4 @@ if (typeof window.Cosmic3DStarfield === 'undefined') {
   }
   };
 }
+

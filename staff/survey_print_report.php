@@ -2,94 +2,25 @@
 /**
  * staff/survey_print_report.php
  * -------------------------------------------------------
- * Staff Portal — Printable Survey Summary & Analytics Report (SET B)
+ * Staff Portal — Printable Survey Summary & Analytics Report (Firebase)
  * Standalone, high-contrast, print-optimized document layout.
  * -------------------------------------------------------
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_staff();
 
-$surveyId = (int)($_GET['id'] ?? 0);
-
-if ($surveyId <= 0) {
+$surveyId = $_GET['id'] ?? '';
+if (empty($surveyId)) {
     die('Invalid survey requested.');
-}
-
-// 1. Fetch Survey Details
-$stmt = $pdo->prepare(
-    "SELECT s.*, st.fullname AS author_name 
-     FROM surveys s
-     LEFT JOIN staff st ON st.staff_id = s.created_by_staff_id
-     WHERE s.survey_id = ? 
-     LIMIT 1"
-);
-$stmt->execute([$surveyId]);
-$survey = $stmt->fetch();
-
-if (!$survey) {
-    die('Survey not found.');
 }
 
 // Determine safe fallback URL for back navigation
 $fallbackUrl = 'surveys.php';
 if (!empty($_SERVER['HTTP_REFERER'])) {
     $ref = $_SERVER['HTTP_REFERER'];
-    $baseHost = parse_url(BASE_URL, PHP_URL_HOST);
-    if (empty($refHost) || $refHost === $serverHost || $refHost === $baseHost || strpos($ref, 'cooperative-member-information-system') !== false) {
+    if (strpos($ref, 'cooperative-member-information-system') !== false) {
         $fallbackUrl = $ref;
     }
-}
-
-// 2. Compute Live Survey Metrics
-$totalMembers = (int)$pdo->query("SELECT COUNT(*) FROM member")->fetchColumn();
-
-$respCountStmt = $pdo->prepare("SELECT COUNT(DISTINCT member_id) FROM responses WHERE survey_id = ?");
-$respCountStmt->execute([$surveyId]);
-$totalRespondents = (int)$respCountStmt->fetchColumn();
-
-$participationRate = $totalMembers > 0 ? round(($totalRespondents / $totalMembers) * 100, 1) : 0;
-
-// 3. Fetch Questions
-$qStmt = $pdo->prepare(
-    "SELECT * FROM survey_questions 
-     WHERE survey_id = ? 
-     ORDER BY question_order ASC, question_id ASC"
-);
-$qStmt->execute([$surveyId]);
-$questions = $qStmt->fetchAll();
-
-// 4. Calculate Live Statistics per Question
-$choicesByQuestion = [];
-$cStmt = $pdo->prepare(
-    "SELECT sc.*,
-            (SELECT COUNT(*) FROM responses r WHERE r.question_id = sc.question_id AND r.choice_id = sc.choice_id) AS vote_count
-     FROM survey_choices sc
-     INNER JOIN survey_questions sq ON sq.question_id = sc.question_id
-     WHERE sq.survey_id = ?
-     ORDER BY sc.choice_order ASC, sc.choice_id ASC"
-);
-$cStmt->execute([$surveyId]);
-$allChoices = $cStmt->fetchAll();
-
-foreach ($allChoices as $c) {
-    $choicesByQuestion[$c['question_id']][] = $c;
-}
-
-$shortAnswersByQuestion = [];
-$saStmt = $pdo->prepare(
-    "SELECT r.*, m.account_number, m.firstname, m.lastname
-     FROM responses r
-     INNER JOIN survey_questions sq ON sq.question_id = r.question_id
-     INNER JOIN member m ON m.member_id = r.member_id
-     WHERE sq.survey_id = ? AND sq.question_type = 'short_answer'
-     ORDER BY r.submitted_at ASC"
-);
-$saStmt->execute([$surveyId]);
-$shortAnswers = $saStmt->fetchAll();
-
-foreach ($shortAnswers as $sa) {
-    $shortAnswersByQuestion[$sa['question_id']][] = $sa;
 }
 ?>
 <!DOCTYPE html>
@@ -97,7 +28,7 @@ foreach ($shortAnswers as $sa) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Survey Report &mdash; <?= e($survey['title']) ?></title>
+  <title>Survey Report</title>
   
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -347,193 +278,273 @@ foreach ($shortAnswers as $sa) {
 </head>
 <body>
 
-  <!-- Floating Print Control Bar -->
   <div class="no-print">
-    <a href="<?= e($fallbackUrl) ?>" onclick="if(window.history.length > 1){ window.history.back(); return false; }" class="btn btn-secondary btn-icon" title="Go Back" aria-label="Go Back">
+    <a href="<?= e($fallbackUrl) ?>" onclick="if(window.history.length > 1){ window.history.back(); return false; }" class="btn btn-secondary btn-icon" title="Go Back">
       <i class="fa-solid fa-arrow-left"></i>
     </a>
-    <button onclick="window.print()" class="btn btn-primary">
-      <i class="fa-solid fa-print"></i> Print Report Now
+    <button onclick="window.print()" class="btn btn-primary" id="printBtn" disabled>
+      <i class="fa-solid fa-print"></i> Loading Report...
     </button>
   </div>
 
-  <div class="report-paper">
-    <!-- Header -->
-    <div class="report-header">
-      <div>
-        <div class="brand-title">SPACE MULTIPURPOSE COOPERATIVE</div>
-        <div class="brand-sub">Official Survey Analytics &amp; Member Feedback Report</div>
-      </div>
-      <div>
-        <span class="report-badge"><i class="fa-solid fa-file-circle-check me-1"></i> Official Report</span>
-      </div>
-    </div>
-
-    <!-- Survey Meta Info Box -->
-    <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 15px; color: #111827;">General Information</h3>
-    <div class="meta-box">
-      <div class="meta-item">
-        <label>Survey Title</label>
-        <span><?= e($survey['title']) ?></span>
-      </div>
-      <div class="meta-item">
-        <label>Schedule Duration</label>
-        <span><?= date('M d, Y g:i A', strtotime($survey['start_date'])) ?> &mdash; <?= date('M d, Y g:i A', strtotime($survey['end_date'])) ?></span>
-      </div>
-      <div class="meta-item">
-        <label>Current Status</label>
-        <span style="text-transform: capitalize; color: #008775;"><?= e($survey['status']) ?></span>
-      </div>
-      <div class="meta-item">
-        <label>Author / Staff</label>
-        <span><?= e($survey['author_name'] ?: 'Staff Admin') ?></span>
-      </div>
-      <div class="meta-item">
-        <label>General Overview of All Members</label>
-        <span><?= number_format($totalMembers) ?> Registered Members</span>
-      </div>
-      <div class="meta-item">
-        <label>Total Number of Responses</label>
-        <span><?= number_format($totalRespondents) ?> Responses (<?= $participationRate ?>%)</span>
-      </div>
-      <div class="meta-item">
-        <label>Date Compiled</label>
-        <span><?= date('F d, Y \a\t h:i A') ?></span>
-      </div>
-    </div>
-
-    <?php if (!empty($survey['description'])): ?>
-      <div style="margin-bottom: 25px; padding: 12px 18px; background: #f8fafc; border-left: 3.5px solid #008775; font-size: 13px; color: #334155; border-radius: 0 6px 6px 0;">
-        <strong style="color: #0f172a;">Survey Description:</strong> <?= nl2br(e($survey['description'])) ?>
-      </div>
-    <?php endif; ?>
-
-    <!-- Questions & Results Breakdown -->
-    <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 15px; color: #111827;">Specific Survey Questions</h3>
-
-    <?php foreach ($questions as $index => $q): ?>
-      <?php 
-        $qId = (int)$q['question_id'];
-        $qChoices = $choicesByQuestion[$qId] ?? [];
-        $qShortAnswers = $shortAnswersByQuestion[$qId] ?? [];
-        $qNumber = $index + 1;
-        $qType = $q['question_type'];
-
-        // Compute total votes for this question
-        $qTotalVotes = 0;
-        $ratingSum = 0;
-        foreach ($qChoices as $c) {
-            $v = (int)$c['vote_count'];
-            $qTotalVotes += $v;
-            if ($qType === 'rating') {
-                preg_match('/^(\d+)/', $c['choice_text'], $m);
-                $num = !empty($m[1]) ? (int)$m[1] : (int)$c['choice_order'];
-                $ratingSum += ($num * $v);
-            }
-        }
-        $avgScore = ($qType === 'rating' && $qTotalVotes > 0) ? round($ratingSum / $qTotalVotes, 2) : null;
-      ?>
-      <div class="question-block">
-        <div class="question-head">
-          <div>
-            <span class="q-number">Q<?= $qNumber ?>.</span>
-            <span class="q-title"><?= e($q['question']) ?></span>
-          </div>
-          <div>
-            <?php
-              $printTypeDisplay = match($qType) {
-                'multiple_choice' => 'Multiple Choice',
-                'yes_no'          => 'Yes/No',
-                'rating'          => 'Rating Scale',
-                'short_answer'    => 'Description Type Answer',
-                default           => ucwords(str_replace('_', ' ', $qType))
-              };
-            ?>
-            <span class="q-type"><?= e($printTypeDisplay) ?></span>
-            <?php if ($avgScore !== null): ?>
-              <span class="q-type" style="background: #fef3c7; color: #92400e; margin-left: 5px;">Avg: <?= $avgScore ?> / 5.0</span>
-            <?php endif; ?>
-          </div>
-        </div>
-
-        <?php if ($qType !== 'short_answer'): ?>
-          <table class="results-table">
-            <thead>
-              <tr>
-                <th style="width: 45%;">Selected Option / Choice</th>
-                <th style="width: 20%; text-align: right;">Vote Count</th>
-                <th style="width: 35%;">Percentage</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php foreach ($qChoices as $choice): ?>
-                <?php
-                  $votes = (int)$choice['vote_count'];
-                  $pct = $qTotalVotes > 0 ? round(($votes / $qTotalVotes) * 100, 1) : 0.0;
-                ?>
-                <tr>
-                  <td style="font-weight: 600;"><?= e($choice['choice_text']) ?></td>
-                  <td style="text-align: right; font-weight: 700; color: #00897b;"><?= $votes ?></td>
-                  <td>
-                    <div class="bar-container">
-                      <div class="bar-fill" style="width: <?= $pct ?>%;"></div>
-                    </div>
-                    <strong><?= $pct ?>%</strong>
-                  </td>
-                </tr>
-              <?php endforeach; ?>
-              <tr style="background: #f9fafb; font-weight: 700;">
-                <td>Total Question Responses</td>
-                <td style="text-align: right;"><?= $qTotalVotes ?></td>
-                <td>100.0%</td>
-              </tr>
-            </tbody>
-          </table>
-        <?php else: ?>
-          <table class="results-table">
-            <thead>
-              <tr>
-                <th style="width: 25%;">Respondent Member</th>
-                <th style="width: 55%;">Submitted Feedback / Response</th>
-                <th style="width: 20%;">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php if (empty($qShortAnswers)): ?>
-                <tr>
-                  <td colspan="3" style="text-align: center; color: #9ca3af; padding: 15px;">No written responses submitted for this question.</td>
-                </tr>
-              <?php else: ?>
-                <?php foreach ($qShortAnswers as $sa): ?>
-                  <tr>
-                    <td style="font-weight: 600;">
-                      <?= e($sa['firstname'] . ' ' . $sa['lastname']) ?><br>
-                      <small style="color: #6b7280; font-weight: normal;"><?= e($sa['account_number']) ?></small>
-                    </td>
-                    <td><?= nl2br(e($sa['answer'])) ?></td>
-                    <td style="font-size: 12px; color: #6b7280;"><?= date('M d, Y h:i A', strtotime($sa['submitted_at'])) ?></td>
-                  </tr>
-                <?php endforeach; ?>
-              <?php endif; ?>
-            </tbody>
-          </table>
-        <?php endif; ?>
-      </div>
-    <?php endforeach; ?>
-
-    <!-- Sign-off Section -->
-    <div class="report-footer">
-      <div class="sign-box">
-        <div class="sign-line"></div>
-        <div class="sign-label">Prepared By (Staff in Charge)</div>
-      </div>
-      <div class="sign-box">
-        <div class="sign-line"></div>
-        <div class="sign-label">Certified Correct (Admin / BOD)</div>
-      </div>
-    </div>
-
+  <div class="report-paper" id="reportPaper">
+    <div style="text-align:center; padding: 50px;"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>Generating Report...</div>
   </div>
 
+  <script type="module">
+    import { db, auth } from '../assets/js/firebase-init.js';
+    import { doc, getDoc, collection, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+    onAuthStateChanged(auth, (user) => {
+      if (!user) window.location.href = '../login.php';
+    });
+
+    const surveyId = "<?= e($surveyId) ?>";
+    const reportPaper = document.getElementById('reportPaper');
+    const printBtn = document.getElementById('printBtn');
+
+    async function loadReport() {
+        try {
+            const surveyDoc = await getDoc(doc(db, 'surveys', surveyId));
+            if (!surveyDoc.exists()) {
+                reportPaper.innerHTML = '<h2>Survey not found.</h2>';
+                return;
+            }
+            const survey = surveyDoc.data();
+            
+            // Total members
+            const membersSnap = await getDocs(collection(db, 'member'));
+            const totalMembers = membersSnap.size;
+
+            // Responses & unique respondents
+            const responsesSnap = await getDocs(query(collection(db, 'responses'), where('survey_id', '==', surveyId)));
+            const uniqueRespondents = new Set();
+            const allResponses = [];
+            responsesSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                uniqueRespondents.add(data.member_id);
+                allResponses.push(data);
+            });
+            const totalRespondents = uniqueRespondents.size;
+            const participationRate = totalMembers > 0 ? ((totalRespondents / totalMembers) * 100).toFixed(1) : 0;
+
+            // Fetch questions
+            const questionsSnap = await getDocs(query(collection(db, 'survey_questions'), where('survey_id', '==', surveyId), orderBy('question_order')));
+            const questions = [];
+            questionsSnap.forEach(docSnap => {
+                questions.push({ id: docSnap.id, ...docSnap.data() });
+            });
+
+            // Fetch choices
+            const choicesSnap = await getDocs(query(collection(db, 'survey_choices'), orderBy('choice_order')));
+            const choicesByQuestion = {};
+            choicesSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                if (!choicesByQuestion[data.question_id]) choicesByQuestion[data.question_id] = [];
+                choicesByQuestion[data.question_id].push({ id: docSnap.id, ...data });
+            });
+
+            // Member data map for short answers
+            const membersMap = {};
+            membersSnap.forEach(docSnap => {
+                membersMap[docSnap.id] = docSnap.data();
+            });
+
+            document.title = `Survey Report - ${survey.title}`;
+
+            const formatDate = (dateStr) => {
+                if(!dateStr) return '';
+                const d = new Date(dateStr);
+                return d.toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+            };
+
+            const compileDate = new Date().toLocaleString('en-US', { month: 'long', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+
+            let html = `
+                <div class="report-header">
+                  <div>
+                    <div class="brand-title">SPACE MULTIPURPOSE COOPERATIVE</div>
+                    <div class="brand-sub">Official Survey Analytics &amp; Member Feedback Report</div>
+                  </div>
+                  <div>
+                    <span class="report-badge"><i class="fa-solid fa-file-circle-check me-1"></i> Official Report</span>
+                  </div>
+                </div>
+
+                <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 15px; color: #111827;">General Information</h3>
+                <div class="meta-box">
+                  <div class="meta-item"><label>Survey Title</label><span>${escapeHtml(survey.title)}</span></div>
+                  <div class="meta-item"><label>Schedule Duration</label><span>${formatDate(survey.start_date)} &mdash; ${formatDate(survey.end_date)}</span></div>
+                  <div class="meta-item"><label>Current Status</label><span style="text-transform: capitalize; color: #008775;">${escapeHtml(survey.status)}</span></div>
+                  <div class="meta-item"><label>Author / Staff</label><span>${escapeHtml(survey.created_by_staff_id ? 'Staff Admin' : 'Staff Admin')}</span></div>
+                  <div class="meta-item"><label>General Overview of All Members</label><span>${totalMembers} Registered Members</span></div>
+                  <div class="meta-item"><label>Total Number of Responses</label><span>${totalRespondents} Responses (${participationRate}%)</span></div>
+                  <div class="meta-item"><label>Date Compiled</label><span>${compileDate}</span></div>
+                </div>
+            `;
+
+            if (survey.description) {
+                html += `
+                  <div style="margin-bottom: 25px; padding: 12px 18px; background: #f8fafc; border-left: 3.5px solid #008775; font-size: 13px; color: #334155; border-radius: 0 6px 6px 0;">
+                    <strong style="color: #0f172a;">Survey Description:</strong> ${escapeHtml(survey.description).replace(/\n/g, '<br>')}
+                  </div>
+                `;
+            }
+
+            html += `<h3 style="font-size: 16px; font-weight: 700; margin-bottom: 15px; color: #111827;">Specific Survey Questions</h3>`;
+
+            questions.forEach((q, index) => {
+                const qId = q.id;
+                const qType = q.question_type;
+                const qChoices = choicesByQuestion[qId] || [];
+                
+                let printTypeDisplay = 'Multiple Choice';
+                if (qType === 'yes_no') printTypeDisplay = 'Yes/No';
+                else if (qType === 'rating') printTypeDisplay = 'Rating Scale';
+                else if (qType === 'short_answer') printTypeDisplay = 'Description Type Answer';
+
+                let qTotalVotes = 0;
+                let ratingSum = 0;
+
+                // Compute votes per choice for choices questions
+                if (qType !== 'short_answer') {
+                    qChoices.forEach(c => {
+                        let count = allResponses.filter(r => r.question_id === qId && r.choice_id === c.id).length;
+                        c.vote_count = count;
+                        qTotalVotes += count;
+                        if (qType === 'rating') {
+                            const match = c.choice_text.match(/^(\d+)/);
+                            const num = match ? parseInt(match[1]) : c.choice_order;
+                            ratingSum += (num * count);
+                        }
+                    });
+                }
+
+                const avgScore = (qType === 'rating' && qTotalVotes > 0) ? (ratingSum / qTotalVotes).toFixed(2) : null;
+
+                html += `
+                  <div class="question-block">
+                    <div class="question-head">
+                      <div>
+                        <span class="q-number">Q${index + 1}.</span>
+                        <span class="q-title">${escapeHtml(q.question)}</span>
+                      </div>
+                      <div>
+                        <span class="q-type">${escapeHtml(printTypeDisplay)}</span>
+                        ${avgScore !== null ? `<span class="q-type" style="background: #fef3c7; color: #92400e; margin-left: 5px;">Avg: ${avgScore} / 5.0</span>` : ''}
+                      </div>
+                    </div>
+                `;
+
+                if (qType !== 'short_answer') {
+                    html += `
+                      <table class="results-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 45%;">Selected Option / Choice</th>
+                            <th style="width: 20%; text-align: right;">Vote Count</th>
+                            <th style="width: 35%;">Percentage</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                    `;
+                    qChoices.forEach(choice => {
+                        const votes = choice.vote_count || 0;
+                        const pct = qTotalVotes > 0 ? ((votes / qTotalVotes) * 100).toFixed(1) : '0.0';
+                        html += `
+                          <tr>
+                            <td style="font-weight: 600;">${escapeHtml(choice.choice_text)}</td>
+                            <td style="text-align: right; font-weight: 700; color: #00897b;">${votes}</td>
+                            <td>
+                              <div class="bar-container">
+                                <div class="bar-fill" style="width: ${pct}%;"></div>
+                              </div>
+                              <strong>${pct}%</strong>
+                            </td>
+                          </tr>
+                        `;
+                    });
+                    html += `
+                          <tr style="background: #f9fafb; font-weight: 700;">
+                            <td>Total Question Responses</td>
+                            <td style="text-align: right;">${qTotalVotes}</td>
+                            <td>100.0%</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    `;
+                } else {
+                    html += `
+                      <table class="results-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 25%;">Respondent Member</th>
+                            <th style="width: 55%;">Submitted Feedback / Response</th>
+                            <th style="width: 20%;">Timestamp</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                    `;
+                    const shortAnsResp = allResponses.filter(r => r.question_id === qId);
+                    if (shortAnsResp.length === 0) {
+                        html += `<tr><td colspan="3" style="text-align: center; color: #9ca3af; padding: 15px;">No written responses submitted for this question.</td></tr>`;
+                    } else {
+                        shortAnsResp.forEach(sa => {
+                            const member = membersMap[sa.member_id] || {};
+                            const fname = member.firstname || 'Unknown';
+                            const lname = member.lastname || 'Member';
+                            const accNo = member.account_number || '';
+                            const ts = formatDate(sa.submitted_at || sa.created_at);
+                            html += `
+                              <tr>
+                                <td style="font-weight: 600;">
+                                  ${escapeHtml(fname + ' ' + lname)}<br>
+                                  <small style="color: #6b7280; font-weight: normal;">${escapeHtml(accNo)}</small>
+                                </td>
+                                <td>${escapeHtml(sa.answer).replace(/\n/g, '<br>')}</td>
+                                <td style="font-size: 12px; color: #6b7280;">${ts}</td>
+                              </tr>
+                            `;
+                        });
+                    }
+                    html += `</tbody></table>`;
+                }
+
+                html += `</div>`; // End question block
+            });
+
+            html += `
+                <div class="report-footer">
+                  <div class="sign-box">
+                    <div class="sign-line"></div>
+                    <div class="sign-label">Prepared By (Staff in Charge)</div>
+                  </div>
+                  <div class="sign-box">
+                    <div class="sign-line"></div>
+                    <div class="sign-label">Certified Correct (Admin / BOD)</div>
+                  </div>
+                </div>
+            `;
+
+            reportPaper.innerHTML = html;
+            printBtn.innerHTML = '<i class="fa-solid fa-print"></i> Print Report Now';
+            printBtn.disabled = false;
+
+        } catch (error) {
+            console.error("Error loading report:", error);
+            reportPaper.innerHTML = '<h3 style="color:red;">Error loading report data.</h3>';
+        }
+    }
+
+    function escapeHtml(unsafe) {
+        if(!unsafe) return '';
+        return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    loadReport();
+  </script>
 </body>
 </html>
+
+

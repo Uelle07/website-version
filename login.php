@@ -11,46 +11,6 @@
 
 require_once __DIR__ . '/config/init.php';
 
-// Already logged in? Skip the form entirely.
-if (is_member()) {
-    redirect('member/dashboard.php');
-} elseif (is_staff()) {
-    redirect('staff/dashboard.php');
-}
-
-$errors = [];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verify_csrf($_POST['csrf_token'] ?? '');
-
-    $identifier = clean($_POST['username'] ?? '');
-    $password   = $_POST['password'] ?? '';
-
-    if ($identifier === '' || $password === '') {
-        $errors[] = 'Please enter your Account Number / Username and password.';
-    } else {
-        $memberAuthError = null;
-        $staffAuthError  = null;
-
-        if (authenticate_member($pdo, $identifier, $password, $memberAuthError)) {
-            if (!$_SESSION['password_changed'] && $_SESSION['first_login']) {
-                set_flash('info', 'Welcome! For your security, please change your password.');
-                redirect('member/change_password.php');
-            }
-            set_flash('success', 'Welcome back, ' . $_SESSION['username'] . '!');
-            redirect('member/dashboard.php');
-        } elseif ($memberAuthError && strpos($memberAuthError, 'locked') !== false) {
-            $errors[] = $memberAuthError;
-        } elseif (authenticate_staff($pdo, $identifier, $password, $staffAuthError)) {
-            redirect('staff/dashboard.php');
-        } elseif ($staffAuthError && strpos($staffAuthError, 'locked') !== false) {
-            $errors[] = $staffAuthError;
-        } else {
-            $errors[] = $memberAuthError ?: ($staffAuthError ?: 'Invalid Account Number/Username or password.');
-        }
-    }
-}
-
 $pageTitle = 'Login';
 ?>
 <!DOCTYPE html>
@@ -91,25 +51,17 @@ $pageTitle = 'Login';
 
                 <?php render_flash_messages(); ?>
 
-                <?php if (!empty($errors)): ?>
-                <div class="error-message" id="loginErrorMessage">
+                <div class="error-message" id="loginErrorMessage" style="display: none;">
                     <i class="bi bi-exclamation-circle-fill"></i>
-                    <span>
-                        <?php foreach ($errors as $err): ?>
-                            <?= e($err) ?><br>
-                        <?php endforeach; ?>
-                    </span>
+                    <span></span>
                 </div>
-                <?php endif; ?>
 
-                <form action="<?= e(BASE_URL) ?>/login.php" method="POST" novalidate>
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-
+                <form id="loginForm" novalidate>
                     <div class="form-group">
                         <label for="username">Account No. / Username</label>
                         <input type="text" id="username" name="username" class="form-control"
                                placeholder="e.g. 2026-0001 or staff_user"
-                               value="<?= e($_POST['username'] ?? '') ?>" required autofocus>
+                               required autofocus>
                     </div>
 
                     <div class="form-group">
@@ -252,6 +204,67 @@ $pageTitle = 'Login';
         });
     })();
 
+    </script>
+    <script type="module">
+        import { auth, db } from '<?= e(BASE_URL) ?>/assets/js/firebase-init.js';
+        import { signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                try {
+                    const staffDoc = await getDoc(doc(db, "staff", user.uid));
+                    if (staffDoc.exists()) {
+                        window.location.href = '<?= e(BASE_URL) ?>/staff/dashboard.php';
+                    } else {
+                        window.location.href = '<?= e(BASE_URL) ?>/member/dashboard.php';
+                    }
+                } catch (err) {
+                    console.error("Error fetching user role: ", err);
+                    alert("Login Error: " + err.message);
+                }
+            }
+        });
+
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const identifier = document.getElementById('username').value.trim();
+                const password = document.getElementById('password').value;
+                const errorMsg = document.getElementById('loginErrorMessage');
+                const btnLogin = document.querySelector('.btn-login');
+
+                if (!identifier || !password) {
+                    errorMsg.style.display = 'flex';
+                    errorMsg.querySelector('span').innerText = 'Please enter your Account Number / Username and password.';
+                    return;
+                }
+
+                // Temporary convention: append a domain to use Firebase Email/Password auth
+                const email = identifier.includes('@') ? identifier : `${identifier}@space.coop`;
+
+                btnLogin.disabled = true;
+                btnLogin.innerText = 'Logging in...';
+
+                try {
+                    await signInWithEmailAndPassword(auth, email, password);
+                    // onAuthStateChanged will redirect
+                } catch (error) {
+                    console.error('Login error:', error);
+                    errorMsg.style.display = 'flex';
+                    let message = 'Invalid Account Number/Username or password.';
+                    if (error.code === 'auth/too-many-requests') {
+                        message = 'Too many failed attempts. Account is temporarily locked.';
+                    }
+                    errorMsg.querySelector('span').innerText = message;
+                    
+                    btnLogin.disabled = false;
+                    btnLogin.innerText = 'Login';
+                }
+            });
+        }
     </script>
     <script src="<?= e(BASE_URL) ?>/assets/js/script.js"></script>
 </body>

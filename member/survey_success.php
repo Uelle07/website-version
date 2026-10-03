@@ -9,27 +9,11 @@
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_member();
-
-$memberId = current_user_id();
-$surveyId = (int) ($_GET['id'] ?? 0);
-
-// Fetch survey submission receipt
-$stmt = $pdo->prepare(
-    "SELECT s.title, s.description, MAX(r.submitted_at) AS submitted_at, COUNT(DISTINCT r.question_id) AS total_answered
-     FROM surveys s
-     INNER JOIN responses r ON r.survey_id = s.survey_id AND r.member_id = ?
-     WHERE s.survey_id = ?
-     GROUP BY s.survey_id"
-);
-$stmt->execute([$memberId, $surveyId]);
-$receipt = $stmt->fetch();
-
 $pageTitle = 'Survey Submitted Successfully';
 require_once __DIR__ . '/../pages/header.php';
 ?>
 
-<div class="dashboard-wrapper">
+<div class="dashboard-wrapper" style="display: none;" id="mainContent">
     <!-- Top Action Navigation -->
     <div class="d-flex justify-content-between align-items-center mb-3 no-print">
         <a href="dashboard.php" class="btn btn-outline-light btn-sm d-inline-flex align-items-center gap-2" style="border-radius: 20px; padding: 6px 16px; backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.08); border-color: rgba(255,255,255,0.2);">
@@ -55,32 +39,30 @@ require_once __DIR__ . '/../pages/header.php';
                         Thank you for your valuable participation. Your feedback has been securely registered and recorded into the cooperative system.
                     </p>
 
-                    <?php if ($receipt): ?>
-                        <div class="structured-box text-start mb-4" style="background: var(--input-bg); border: 1px solid var(--bg-card-border); border-radius: 12px; padding: 1.25rem 1.5rem;">
-                            <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
-                                <span style="color: var(--text-dim); font-size: 0.85rem;">Survey Title:</span>
-                                <span style="color: var(--text-main); font-weight: 700; font-size: 0.9rem; max-width: 280px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><?= e($receipt['title']) ?></span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
-                                <span style="color: var(--text-dim); font-size: 0.85rem;">Completed Items:</span>
-                                <span style="color: var(--primary-teal); font-weight: 700; font-size: 0.88rem;">
-                                    <i class="fa-solid fa-list-check me-1"></i> <?= (int)$receipt['total_answered'] ?> Questions
-                                </span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
-                                <span style="color: var(--text-dim); font-size: 0.85rem;">Submission Time:</span>
-                                <span style="color: var(--text-main); font-size: 0.85rem;">
-                                    <i class="fa-solid fa-clock me-1" style="color: var(--primary-teal);"></i> <?= date('M d, Y · h:i A', strtotime($receipt['submitted_at'])) ?>
-                                </span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span style="color: var(--text-dim); font-size: 0.85rem;">Record Status:</span>
-                                <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 20px; padding: 3px 10px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                                    <i class="fa-solid fa-shield-halved"></i> Verified &amp; Saved
-                                </span>
-                            </div>
+                    <div id="receiptBox" class="structured-box text-start mb-4" style="display: none; background: var(--input-bg); border: 1px solid var(--bg-card-border); border-radius: 12px; padding: 1.25rem 1.5rem;">
+                        <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
+                            <span style="color: var(--text-dim); font-size: 0.85rem;">Survey Title:</span>
+                            <span id="receiptTitle" style="color: var(--text-main); font-weight: 700; font-size: 0.9rem; max-width: 280px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
                         </div>
-                    <?php endif; ?>
+                        <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
+                            <span style="color: var(--text-dim); font-size: 0.85rem;">Completed Items:</span>
+                            <span style="color: var(--primary-teal); font-weight: 700; font-size: 0.88rem;">
+                                <i class="fa-solid fa-list-check me-1"></i> <span id="receiptTotalAnswered">0</span> Questions
+                            </span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px solid var(--bg-card-border);">
+                            <span style="color: var(--text-dim); font-size: 0.85rem;">Submission Time:</span>
+                            <span style="color: var(--text-main); font-size: 0.85rem;">
+                                <i class="fa-solid fa-clock me-1" style="color: var(--primary-teal);"></i> <span id="receiptSubmittedAt"></span>
+                            </span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span style="color: var(--text-dim); font-size: 0.85rem;">Record Status:</span>
+                            <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 20px; padding: 3px 10px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                                <i class="fa-solid fa-shield-halved"></i> Verified &amp; Saved
+                            </span>
+                        </div>
+                    </div>
 
                     <div class="d-flex justify-content-center gap-3 flex-wrap">
                         <a href="surveys.php" class="btn btn-outline-light px-4 py-2" style="border-radius: 12px; font-weight: 600; background: var(--input-bg); border-color: var(--bg-card-border); font-size: 0.9rem;">
@@ -96,4 +78,62 @@ require_once __DIR__ . '/../pages/header.php';
     </div>
 </div>
 
+<script type="module">
+    import { auth, db } from '../assets/js/firebase-init.js';
+    import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    onAuthStateChanged(auth, async (user) => {
+        if (!user) {
+            window.location.href = '../login.php';
+            return;
+        }
+
+        document.getElementById('mainContent').style.display = 'block';
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const surveyId = urlParams.get('id');
+
+        if (surveyId) {
+            try {
+                // Fetch survey details
+                const surveyRef = doc(db, 'surveys', surveyId);
+                const surveySnap = await getDoc(surveyRef);
+
+                if (surveySnap.exists()) {
+                    const surveyData = surveySnap.data();
+                    
+                    // Fetch responses
+                    const responsesRef = collection(db, 'responses');
+                    const q = query(responsesRef, where('survey_id', '==', surveyId), where('member_id', '==', user.uid));
+                    const responsesSnap = await getDocs(q);
+
+                    if (!responsesSnap.empty) {
+                        let maxSubmittedAt = null;
+                        const answeredQuestionIds = new Set();
+                        
+                        responsesSnap.forEach(docSnap => {
+                            const data = docSnap.data();
+                            answeredQuestionIds.add(data.question_id);
+                            
+                            if (!maxSubmittedAt || new Date(data.submitted_at) > maxSubmittedAt) {
+                                maxSubmittedAt = new Date(data.submitted_at);
+                            }
+                        });
+
+                        document.getElementById('receiptTitle').textContent = surveyData.title;
+                        document.getElementById('receiptTotalAnswered').textContent = answeredQuestionIds.size;
+                        document.getElementById('receiptSubmittedAt').textContent = maxSubmittedAt.toLocaleString();
+                        
+                        document.getElementById('receiptBox').style.display = 'block';
+                    }
+                }
+            } catch(e) {
+                console.error("Error fetching receipt details", e);
+            }
+        }
+    });
+</script>
+
 <?php require_once __DIR__ . '/../pages/footer.php'; ?>
+

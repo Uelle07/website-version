@@ -107,6 +107,10 @@ if (!defined('APP_LOADED')) {
               </div>
             </div>
             <div class="form-group">
+              <label>Email Address <span style="color: #f87171;">*</span></label>
+              <input type="email" id="addEmail" name="email" placeholder="e.g., sample@gmail.com" required>
+            </div>
+            <div class="form-group">
               <label>Occupation <span style="color: #f87171;">*</span></label>
               <input type="text" id="addOccupation" name="occupation" placeholder="e.g., Accountant" required>
             </div>
@@ -345,6 +349,10 @@ if (!defined('APP_LOADED')) {
                 <label>Contact Number <span style="color: #f87171;">*</span></label>
                 <input type="tel" id="editContact" name="contact" required oninput="formatContactNumber(this)">
               </div>
+                <div class="form-group">
+                  <label>Email Address <span style="color: #f87171;">*</span></label>
+                  <input type="email" id="editEmail" name="email" placeholder="e.g., sample@gmail.com" required>
+                </div>
               <div class="form-group full-width" style="grid-column: span 2;">
                 <label>Full Home Address <span style="color: #f87171;">*</span></label>
                 <input type="text" id="editAddress" name="address" placeholder="House No., Street, Barangay, City" required>
@@ -440,7 +448,7 @@ if (!defined('APP_LOADED')) {
             <div class="form-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.85rem;">
               <div class="form-group">
                 <label>Passport Photo (Optional)</label>
-                <input type="file" id="editPassportPhotoInput" name="passport_photo" accept="image/jpeg,image/png">
+                <input type="file" id="editPassportPhotoInput" name="passport_photo" accept="image/jpeg,image/png" onchange="handleEditPhotoUpload(event)">
                 <div id="editPhotoPreviewSlot" style="margin-top: 0.4rem; font-size: 0.8rem; color: var(--text-muted);"></div>
               </div>
               <div class="form-group">
@@ -539,11 +547,13 @@ if (!defined('APP_LOADED')) {
       <form id="adminPhotoForm" action="<?= e(BASE_URL) ?>/staff/update_admin_photo.php" method="POST" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" id="adminPhotoAction" value="upload">
+        <input type="hidden" name="staff_id" id="adminPhotoStaffId" value="">
+        <input type="hidden" name="current_photo" id="adminPhotoCurrentPhoto" value="">
         
         <div class="admin-photo-edit-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem 0;">
           <div class="admin-photo-preview-slot" id="adminPhotoSlot" style="width: 130px; height: 130px; border-radius: 50%; border: 3px solid var(--primary-teal); overflow: hidden; position: relative; cursor: pointer; box-shadow: 0 0 25px var(--accent-glow); background: var(--badge-bg); display: flex; align-items: center; justify-content: center;" onclick="document.getElementById('adminPhotoFileInput').click()">
-            <img id="adminPhotoPreview" src="<?= !empty($_SESSION['profile_photo']) ? e(photo_url($_SESSION['profile_photo'])) : '' ?>" class="<?= empty($_SESSION['profile_photo']) ? 'hidden' : '' ?>" alt="Admin Preview" style="width: 100%; height: 100%; object-fit: cover;">
-            <i id="adminPhotoPlaceholderIcon" class="fa-solid fa-user <?= !empty($_SESSION['profile_photo']) ? 'hidden' : '' ?>" style="font-size: 3.5rem; color: var(--primary-teal);"></i>
+            <img id="adminPhotoPreview" src="" class="hidden" alt="Admin Preview" style="width: 100%; height: 100%; object-fit: cover;">
+            <i id="adminPhotoPlaceholderIcon" class="fa-solid fa-user" style="font-size: 3.5rem; color: var(--primary-teal);"></i>
             <div class="avatar-hover-overlay"><i class="fa-solid fa-camera"></i><br><span style="font-size: 0.72rem;">Change</span></div>
           </div>
           <input type="file" id="adminPhotoFileInput" name="admin_profile_photo" accept="image/jpeg,image/png" class="hidden" onchange="previewAdminPhoto(event)">
@@ -556,11 +566,9 @@ if (!defined('APP_LOADED')) {
             <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('adminPhotoFileInput').click()">
               <i class="fa-solid fa-folder-open"></i> Browse Picture
             </button>
-            <?php if (!empty($_SESSION['profile_photo'])): ?>
-              <button type="button" class="btn btn-danger btn-sm" onclick="removeAdminPhoto()">
-                <i class="fa-solid fa-trash"></i> Remove Photo
-              </button>
-            <?php endif; ?>
+            <button type="button" class="btn btn-danger btn-sm" id="btnRemoveAdminPhoto" onclick="removeAdminPhoto()" style="display: none;">
+              <i class="fa-solid fa-trash"></i> Remove Photo
+            </button>
           </div>
         </div>
 
@@ -571,6 +579,127 @@ if (!defined('APP_LOADED')) {
       </form>
     </div>
   </div>
+
+<script type="module">
+import { auth, db } from '../assets/js/firebase-init.js';
+import { doc, getDoc, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+window.executeAddMemberFirebase = async function() {
+    const btn = document.getElementById('saveMemberBtn');
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registering...';
+    
+    const form = document.getElementById('addMemberForm');
+    const formData = new FormData(form);
+    const account_number = '2026-' + Math.floor(1000 + Math.random() * 9000);
+    
+    const memberData = {
+        account_number: account_number,
+        firstname: formData.get('firstname'),
+        middlename: formData.get('middlename'),
+        lastname: formData.get('lastname'),
+        extension_name: formData.get('extension_name') || '',
+        sex: formData.get('sex'),
+        nationality: formData.get('nationality'),
+        civil_status: formData.get('civil_status'),
+        birthday: formData.get('birthday'),
+        contact_number: (formData.get('contact_country_code') || '') + ' ' + (formData.get('contact_number') || ''),
+        email: formData.get('email'),
+        address: formData.get('address'),
+        occupation: formData.get('occupation') || 'Not Specified',
+        employer: formData.get('employer') || 'Not Specified',
+        employer_address: formData.get('employer_address') || 'Not Specified',
+        father_name: formData.get('father_name') || 'Not Specified',
+        mother_name: formData.get('mother_name') || 'Not Specified',
+        spouse_name: ((formData.get('spouse_firstname') || '') + ' ' + (formData.get('spouse_lastname') || '')).trim() || 'Not Specified',
+        spouse_occupation: formData.get('spouse_occupation') || 'Not Specified',
+        spouse_employer: formData.get('spouse_employer') || 'Not Specified',
+        account_status: 'Active',
+        created_at: serverTimestamp()
+    };
+    
+    let children = [];
+    const childFirsts = formData.getAll('child_firstname[]');
+    const childLasts = formData.getAll('child_lastname[]');
+    const childBdays = formData.getAll('child_birthday[]');
+    for(let i=0; i<childFirsts.length; i++) {
+        if(childFirsts[i].trim() !== '') {
+            children.push({
+                name: (childFirsts[i] + ' ' + childLasts[i]).trim(),
+                birthday: childBdays[i] || ''
+            });
+        }
+    }
+    memberData.children = children;
+    
+    let references = [];
+    const refNames = formData.getAll('reference_member_name[]');
+    for(let i = 0; i < refNames.length; i++) {
+        if(refNames[i].trim() !== '') {
+            references.push({ name: refNames[i].trim() });
+        }
+    }
+    memberData.references = references;
+    
+    
+    const sigImg = document.getElementById('addSigPreview');
+    if(sigImg && sigImg.src && sigImg.src.startsWith('data:')) {
+         memberData.signature = sigImg.src;
+    }
+    
+    const ppImg = document.getElementById('addPhotoPreview');
+    if(ppImg && ppImg.src && ppImg.src.startsWith('data:')) {
+         memberData.passport_photo = ppImg.src;
+    }
+    
+    try {
+        await addDoc(collection(db, 'member'), memberData);
+        if (typeof showToast === 'function') {
+            showToast('success', 'Member Registered', 'Successfully added member account: ' + account_number);
+        } else {
+            alert('New member registered successfully! Account Number: ' + account_number);
+        }
+        closeModal('addMemberModal');
+        if(typeof loadMembersData === 'function') {
+             loadMembersData();
+        } else if (typeof loadDashboardData === 'function') {
+             loadDashboardData();
+        } else {
+             window.location.reload();
+        }
+    } catch(e) {
+        console.error(e);
+        if (typeof showToast === 'function') {
+            showToast('error', 'Registration Failed', e.message);
+        } else {
+            alert("Error: " + e.message);
+        }
+    } finally {
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-check"></i> Register Member';
+    }
+};
+
+auth.onAuthStateChanged(async (user) => {
+    if (user) {
+        document.getElementById('adminPhotoStaffId').value = user.uid;
+        try {
+            const staffDoc = await getDoc(doc(db, 'staff', user.uid));
+            if (staffDoc.exists()) {
+                const data = staffDoc.data();
+                if (data.profile_photo) {
+                    const img = document.getElementById('adminPhotoPreview');
+                    img.src = '../uploads/' + data.profile_photo;
+                    img.classList.remove('hidden');
+                    document.getElementById('adminPhotoPlaceholderIcon').classList.add('hidden');
+                    document.getElementById('adminPhotoCurrentPhoto').value = data.profile_photo;
+                    document.getElementById('btnRemoveAdminPhoto').style.display = 'inline-block';
+                }
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    }
+});
+</script>
 
   <!-- Pure Member Photo Lightbox Modal (Displays Image Only) -->
   <div id="photoPreviewModal" class="modal-overlay photo-pure-overlay hidden" onclick="if(event.target === this) closeModal('photoPreviewModal');">
@@ -649,7 +778,7 @@ if (!defined('APP_LOADED')) {
               <span class="detail-val" id="viewContact"></span>
             </div>
             <div class="view-grid-field">
-              <span class="detail-label">Account Username</span>
+              <span class="detail-label">Email Address</span>
               <span class="detail-val" id="viewEmail"></span>
             </div>
             <div class="view-grid-field full-col">
@@ -679,7 +808,7 @@ if (!defined('APP_LOADED')) {
         </div>
 
         <!-- Section 3: Family Information -->
-        <div class="view-section-card">
+        <div class="view-section-card" id="viewFamilyInfoSection">
           <h5 class="view-section-heading"><i class="fa-solid fa-people-roof text-emerald"></i> Family Information</h5>
           <div class="family-structured-grid" id="viewFamilyStructuredGrid">
             <div class="family-subcard" id="viewParentsSubcard">
@@ -1069,3 +1198,4 @@ if (!defined('APP_LOADED')) {
       </div>
     </div>
   </div>
+

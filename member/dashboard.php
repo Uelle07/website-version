@@ -8,29 +8,8 @@
  * -------------------------------------------------------
  */
 
-require_once __DIR__ . '/../config/init.php';
-require_member();
-
-// Fetch primary member record from database using session user ID
-$stmt = $pdo->prepare("SELECT * FROM member WHERE member_id = ?");
-$stmt->execute([current_user_id()]);
-$member = $stmt->fetch();
-
-// Redirect to login if member record is missing
-if (!$member) {
-    set_flash('error', 'We could not find your member record. Please contact the cooperative office.');
-    logout_user();
-    redirect('login.php');
-}
-
-// Assign member display variables
-$accountNumber = $member['account_number'];
-$fullName      = trim($member['firstname'] . ' ' . $member['lastname']);
-$civilStatus   = $member['civil_status'] ?? 'Single';
-
-$photo = photo_url($member['passport_photo']);
-
 $pageTitle = 'Dashboard';
+require_once __DIR__ . '/../config/init.php';
 require_once __DIR__ . '/../pages/header.php';
 ?>
 
@@ -39,15 +18,15 @@ require_once __DIR__ . '/../pages/header.php';
     <div class="hero-card">
         <div class="hero-profile">
             <div class="profile-avatar-wrapper">
-                <img src="<?= e($photo) ?>" alt="Member Photo" class="profile-avatar">
+                <img id="memberPhoto" src="../assets/images/default-avatar.png" alt="Member Photo" class="profile-avatar">
                 <span class="status-badge" title="Active Member"></span>
             </div>
             <div class="hero-info">
                 <div class="acc-number">
                     <i class="fa-solid fa-id-card"></i>
-                    <span>ACCT NO. <?= e($accountNumber) ?></span>
+                    <span id="memberAccountNo">Loading...</span>
                 </div>
-                <h2 class="hero-welcome-title">Welcome, <?= e($fullName) ?>!</h2>
+                <h2 class="hero-welcome-title" id="memberWelcomeTitle">Welcome!</h2>
                 <div class="meta-details">
                     <span><i class="fa-solid fa-shield-halved" style="color: #10b981; filter: drop-shadow(0 0 6px rgba(16,185,129,0.4));"></i> Verified Member</span>
                 </div>
@@ -159,5 +138,49 @@ require_once __DIR__ . '/../pages/header.php';
     }
 }
 </style>
+
+<script type="module">
+import { auth, db } from '../assets/js/firebase-init.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../login.php';
+        return;
+    }
+    
+    try {
+        let memberDoc = await getDoc(doc(db, 'member', user.uid));
+        let memberData = null;
+        
+        if (memberDoc.exists()) {
+            memberData = memberDoc.data();
+        } else {
+            const q = query(collection(db, 'member'), where('member_id', '==', user.uid));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+                memberData = querySnapshot.docs[0].data();
+            }
+        }
+        
+        if (memberData) {
+            const photoUrl = memberData.passport_photo ? ('../uploads/' + memberData.passport_photo) : '../assets/images/default-avatar.png';
+            document.getElementById('memberPhoto').src = photoUrl;
+            
+            const accNo = memberData.account_number || 'N/A';
+            document.getElementById('memberAccountNo').innerText = 'ACCT NO. ' + accNo;
+            
+            const fullName = `${memberData.firstname || ''} ${memberData.lastname || ''}`.trim();
+            document.getElementById('memberWelcomeTitle').innerText = 'Welcome, ' + fullName + '!';
+        } else {
+            if(typeof showToast === 'function') showToast('We could not find your member record.', 'error');
+            setTimeout(() => { auth.signOut(); }, 2000);
+        }
+    } catch (error) {
+        console.error("Error fetching member data:", error);
+    }
+});
+</script>
 
 <?php require_once __DIR__ . '/../pages/footer.php'; ?>

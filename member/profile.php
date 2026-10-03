@@ -8,53 +8,9 @@
  * -------------------------------------------------------
  */
 
-require_once __DIR__ . '/../config/init.php';
-require_member();
-
-$memberId = current_user_id();
-
-// Fetch primary member record with account details
-$stmt = $pdo->prepare(
-    "SELECT m.*, ma.username AS account_username, ma.last_login 
-     FROM member m 
-     LEFT JOIN member_account ma ON ma.member_id = m.member_id 
-     WHERE m.member_id = ?"
-);
-$stmt->execute([$memberId]);
-$member = $stmt->fetch();
-
-if (!$member) {
-    set_flash('error', 'Member record not found.');
-    redirect('member/dashboard.php');
-}
-
-// Fetch related records (spouse, parents, children, references)
-$stmt = $pdo->prepare("SELECT * FROM spouse WHERE member_id = ?");
-$stmt->execute([$memberId]);
-$spouse = $stmt->fetch();
-
-$stmt = $pdo->prepare("SELECT * FROM parents WHERE member_id = ?");
-$stmt->execute([$memberId]);
-$parents = $stmt->fetch();
-
-$stmt = $pdo->prepare("SELECT * FROM children WHERE member_id = ? ORDER BY child_id ASC");
-$stmt->execute([$memberId]);
-$children = $stmt->fetchAll();
-
-$stmt = $pdo->prepare("SELECT * FROM member_references WHERE member_id = ?");
-$stmt->execute([$memberId]);
-$references = $stmt->fetchAll();
-
 $pageTitle = 'My Profile';
+require_once __DIR__ . '/../config/init.php';
 require_once __DIR__ . '/../pages/header.php';
-
-$memberAge = !empty($member['birthday']) ? calculate_age($member['birthday']) : null;
-$fullName  = trim($member['firstname'] . ' ' . ($member['middlename'] ? $member['middlename'][0] . '. ' : '') . $member['lastname']);
-if (!empty($member['extension_name'])) {
-    $fullName .= ' ' . $member['extension_name'];
-}
-$status = $member['account_status'] ?? 'Active';
-$sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($references[0]['signature']) ? $references[0]['signature'] : null);
 ?>
 
 <!-- Custom Styling for Profile Alignment, High Contrast & Condensed Print Layout -->
@@ -248,11 +204,11 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
             <p style="margin: 0; font-size: 9.5px; color: #374151; font-weight: 600;">Official Member Profile &bull; Confidential Personal Record</p>
         </div>
         <div style="text-align: right;">
-            <div style="display: inline-block; padding: 2px 8px; font-weight: bold; border-radius: 4px; font-size: 11px; border: 1px solid #0f766e; background: #f0fdfa; color: #0f766e;">
-                ACCOUNT: <?= e($member['account_number']) ?>
+            <div id="printTopAccLabel" style="display: inline-block; padding: 2px 8px; font-weight: bold; border-radius: 4px; font-size: 11px; border: 1px solid #0f766e; background: #f0fdfa; color: #0f766e;">
+                ACCOUNT: Loading...
             </div>
-            <div style="font-size: 9px; color: #374151; margin-top: 2px;">
-                Account Status: <strong><?= e($status) ?></strong> &bull; Account No: <strong><?= e($member['account_number']) ?></strong>
+            <div id="printTopAccDetails" style="font-size: 9px; color: #374151; margin-top: 2px;">
+                Account Status: <strong>Loading...</strong> &bull; Account No: <strong>Loading...</strong>
             </div>
         </div>
     </div>
@@ -264,26 +220,25 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
         <!-- Header Section: Photo & Basic Identity -->
         <div class="row align-items-center mb-4 pb-4" style="border-bottom: 1px solid var(--bg-card-border); row-gap: 16px;">
             <div class="col-md-auto text-center text-md-start mb-2 mb-md-0">
-                <img src="<?= e(photo_url($member['passport_photo'] ?? '')) ?>" alt="Profile Photo"
+                <img id="profPhoto" src="../assets/images/default-avatar.png" alt="Profile Photo"
                      style="width: 110px; height: 110px; object-fit: cover; border-radius: 18px; border: 3px solid var(--primary-teal); box-shadow: 0 6px 20px var(--accent-glow);">
             </div>
             <div class="col-md">
-                <h2 class="mb-1" style="font-weight: 800; font-size: 1.65rem; color: var(--text-main);">
-                    <?= e($fullName) ?>
+                <h2 id="profFullName" class="mb-1" style="font-weight: 800; font-size: 1.65rem; color: var(--text-main);">
+                    Loading...
                 </h2>
-                <p class="mb-3" style="color: var(--text-dim); font-size: 0.90rem;">Account No: <strong style="color: var(--text-main);"><?= e($member['account_number']) ?></strong> &bull; Registered: <strong><?= !empty($member['created_at']) ? date('M d, Y', strtotime($member['created_at'])) : 'Active' ?></strong></p>
+                <p class="mb-3" style="color: var(--text-dim); font-size: 0.90rem;">Account No: <strong id="profAccNoTop" style="color: var(--text-main);">Loading...</strong> &bull; Registered: <strong id="profRegDate">Loading...</strong></p>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="badge bg-primary" style="font-weight: 700; border-radius: 12px; padding: 6px 14px; font-size: 0.8rem;"><i class="fa-solid fa-id-card me-1"></i> Account: <?= e($member['account_number']) ?></span>
-                    <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-weight: 700; font-size: 0.8rem; padding: 6px 14px; border-radius: 12px;"><i class="fa-solid fa-circle-check me-1"></i> Account Status: <?= e($status) ?></span>
+                    <span class="badge bg-primary" style="font-weight: 700; border-radius: 12px; padding: 6px 14px; font-size: 0.8rem;"><i class="fa-solid fa-id-card me-1"></i> Account: <span id="profAccNoBadge"></span></span>
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-weight: 700; font-size: 0.8rem; padding: 6px 14px; border-radius: 12px;"><i class="fa-solid fa-circle-check me-1"></i> Account Status: <span id="profStatusBadge"></span></span>
                 </div>
             </div>
-            <?php if (!empty($sigPhoto)): ?>
-            <div class="col-md-auto text-center mt-2 mt-md-0">
+            
+            <div id="profSigContainer" class="col-md-auto text-center mt-2 mt-md-0" style="display: none;">
                 <div class="profile-label mb-1" style="font-size: 0.72rem;"><i class="fa-solid fa-signature"></i> Signature</div>
-                <img src="<?= e(photo_url($sigPhoto)) ?>" alt="Signature"
+                <img id="profSigImg" src="" alt="Signature"
                      style="height: 52px; max-width: 160px; object-fit: contain; background: #fff; padding: 4px 8px; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
             </div>
-            <?php endif; ?>
         </div>
 
         <!-- Personal Information Segmented Grid -->
@@ -292,45 +247,43 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-cake-candles text-cyan"></i> Date of Birth &amp; Age</div>
-                    <div class="profile-value">
-                        <?= e($member['birthday'] ? date('F d, Y', strtotime($member['birthday'])) . ($memberAge !== null ? ' (' . $memberAge . ' Years Old)' : '') : 'Not Specified') ?>
-                    </div>
+                    <div id="profBirthday" class="profile-value">Not Specified</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-flag text-cyan"></i> Nationality</div>
-                    <div class="profile-value"><?= e($member['nationality'] ?? 'Filipino') ?></div>
+                    <div id="profNationality" class="profile-value">Filipino</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-venus-mars text-cyan"></i> Sex</div>
-                    <div class="profile-value"><?= e($member['sex'] ?: 'Not Specified') ?></div>
+                    <div id="profSex" class="profile-value">Not Specified</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-phone text-cyan"></i> Contact Number</div>
-                    <div class="profile-value"><?= e($member['contact_number'] ?: 'Not Specified') ?></div>
+                    <div id="profContact" class="profile-value">Not Specified</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-user-tag text-cyan"></i> Account Username</div>
-                    <div class="profile-value"><?= e($member['account_username'] ?? ($member['email'] ?? 'N/A')) ?></div>
+                    <div id="profUsername" class="profile-value">N/A</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-ring text-cyan"></i> Civil Status</div>
-                    <div class="profile-value"><?= e($member['civil_status'] ?? 'Single') ?></div>
+                    <div id="profCivil" class="profile-value">Single</div>
                 </div>
             </div>
             <div class="col-12">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-location-dot text-cyan"></i> Full Home Address</div>
-                    <div class="profile-value"><?= e($member['address'] ?: 'Not Specified') ?></div>
+                    <div id="profAddress" class="profile-value">Not Specified</div>
                 </div>
             </div>
         </div>
@@ -341,19 +294,19 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-user-tie text-cyan"></i> Occupation / Profession</div>
-                    <div class="profile-value"><?= e($member['occupation'] ?: 'None') ?></div>
+                    <div id="profOcc" class="profile-value">None</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-building text-cyan"></i> Employer / Business Name</div>
-                    <div class="profile-value"><?= e($member['employer'] ?: 'None') ?></div>
+                    <div id="profEmp" class="profile-value">None</div>
                 </div>
             </div>
             <div class="col-md-4 col-sm-12">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-map-location-dot text-cyan"></i> Employer / Business Address</div>
-                    <div class="profile-value"><?= e($member['employer_address'] ?: 'None') ?></div>
+                    <div id="profEmpAddr" class="profile-value">None</div>
                 </div>
             </div>
         </div>
@@ -364,116 +317,61 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
             <div class="col-md-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-person text-cyan"></i> Father's Full Name</div>
-                    <div class="profile-value"><?= !empty(trim($parents['father_name'] ?? '')) ? e($parents['father_name']) : 'Not Specified' ?></div>
+                    <div id="profFather" class="profile-value">Not Specified</div>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="profile-info-tile">
                     <div class="profile-label"><i class="fa-solid fa-person-dress text-cyan"></i> Mother's Full Name</div>
-                    <div class="profile-value"><?= !empty(trim($parents['mother_name'] ?? '')) ? e($parents['mother_name']) : 'Not Specified' ?></div>
+                    <div id="profMother" class="profile-value">Not Specified</div>
                 </div>
             </div>
         </div>
 
         <!-- Spouse Section -->
-        <?php 
-            $hasSpouse = !empty(trim($spouse['spouse_name'] ?? '')) && ($member['civil_status'] ?? '') !== 'Single';
-        ?>
-        <?php if ($hasSpouse): ?>
-        <h5 class="profile-section-title"><i class="fa-solid fa-heart me-2 text-cyan"></i> Spouse Information</h5>
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="profile-info-tile">
-                    <div class="profile-label"><i class="fa-solid fa-heart text-cyan"></i> Spouse Full Name</div>
-                    <div class="profile-value"><?= e($spouse['spouse_name']) ?></div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="profile-info-tile">
-                    <div class="profile-label"><i class="fa-solid fa-briefcase text-cyan"></i> Spouse Occupation</div>
-                    <div class="profile-value"><?= !empty(trim($spouse['occupation'] ?? '')) ? e($spouse['occupation']) : 'Not Specified' ?></div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="profile-info-tile">
-                    <div class="profile-label"><i class="fa-solid fa-building-user text-cyan"></i> Spouse Employer</div>
-                    <div class="profile-value"><?= !empty(trim($spouse['employer'] ?? '')) ? e($spouse['employer']) : 'Not Specified' ?></div>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <!-- Children Section -->
-        <?php 
-            $validChildren = array_values(array_filter($children ?? [], function($c) {
-                return !empty(trim($c['child_name'] ?? ''));
-            }));
-        ?>
-        <?php if (!empty($validChildren)): ?>
-        <h5 class="profile-section-title"><i class="fa-solid fa-children me-2 text-cyan"></i> Children Information</h5>
-        <div class="row g-3 mb-4">
-            <?php foreach ($validChildren as $index => $child): ?>
-                <?php $childAge = !empty($child['birthday']) ? calculate_age($child['birthday']) : null; ?>
-                <div class="col-md-6">
+        <div id="spouseSection" style="display: none;">
+            <h5 class="profile-section-title"><i class="fa-solid fa-heart me-2 text-cyan"></i> Spouse Information</h5>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
                     <div class="profile-info-tile">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <div class="profile-label mb-0"><i class="fa-solid fa-child text-cyan"></i> Child <?= $index + 1 ?></div>
-                            <?php if ($childAge !== null): ?>
-                                <span class="badge" style="background: rgba(0, 242, 254, 0.12); border: 1px solid var(--bg-card-border-glow); color: var(--primary-teal); font-size: 0.72rem; padding: 3px 8px; border-radius: 8px;">
-                                    <?= $childAge ?> Years Old
-                                </span>
-                            <?php endif; ?>
-                        </div>
-                        <div class="profile-value mb-1" style="font-size: 0.96rem;"><?= e($child['child_name']) ?></div>
-                        <div style="color: var(--text-dim); font-size: 0.82rem;">
-                            Birthday: <strong style="color: var(--text-main);"><?= e($child['birthday'] ? date('F d, Y', strtotime($child['birthday'])) : 'Not Specified') ?></strong>
-                        </div>
+                        <div class="profile-label"><i class="fa-solid fa-heart text-cyan"></i> Spouse Full Name</div>
+                        <div id="spouseName" class="profile-value"></div>
                     </div>
                 </div>
-            <?php endforeach; ?>
+                <div class="col-md-4">
+                    <div class="profile-info-tile">
+                        <div class="profile-label"><i class="fa-solid fa-briefcase text-cyan"></i> Spouse Occupation</div>
+                        <div id="spouseOcc" class="profile-value">Not Specified</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="profile-info-tile">
+                        <div class="profile-label"><i class="fa-solid fa-building-user text-cyan"></i> Spouse Employer</div>
+                        <div id="spouseEmp" class="profile-value">Not Specified</div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <?php endif; ?>
+
+        <!-- Children Section -->
+        <div id="childrenSection" style="display: none;">
+            <h5 class="profile-section-title"><i class="fa-solid fa-children me-2 text-cyan"></i> Children Information</h5>
+            <div id="childrenList" class="row g-3 mb-4">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
 
         <!-- Character References Section -->
         <h5 class="profile-section-title"><i class="fa-solid fa-users me-2 text-cyan"></i> Character References</h5>
-        <div class="row g-3">
-            <?php 
-                $ref1Name = !empty($references[0]['reference_member_name']) ? trim($references[0]['reference_member_name']) : '';
-                $ref2Name = !empty($references[1]['reference_member_name']) ? trim($references[1]['reference_member_name']) : '';
-            ?>
-            <div class="col-md-6">
-                <div class="profile-info-tile">
-                    <div class="profile-label"><i class="fa-solid fa-user-check text-cyan"></i> Reference Member 1</div>
-                    <div class="profile-value"><?= !empty($ref1Name) ? e($ref1Name) : 'Not Specified' ?></div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="profile-info-tile">
-                    <div class="profile-label"><i class="fa-solid fa-user-check text-cyan"></i> Reference Member 2</div>
-                    <div class="profile-value"><?= !empty($ref2Name) ? e($ref2Name) : 'Not Specified' ?></div>
-                </div>
-            </div>
-            <?php if (count($references) > 2): ?>
-                <?php for ($i = 2; $i < count($references); $i++): ?>
-                    <div class="col-md-6">
-                        <div class="profile-info-tile">
-                            <div class="profile-label"><i class="fa-solid fa-user-check text-cyan"></i> Reference Member <?= $i + 1 ?></div>
-                            <div class="profile-value"><?= !empty(trim($references[$i]['reference_member_name'])) ? e($references[$i]['reference_member_name']) : 'Not Specified' ?></div>
-                        </div>
-                    </div>
-                <?php endfor; ?>
-            <?php endif; ?>
+        <div id="refList" class="row g-3">
+            <!-- Dynamically populated -->
         </div>
 
         <!-- Official Print Sign-off Block (Print View Only) -->
         <div class="print-sig-block">
             <div style="text-align: center; width: 190px;">
-                <div style="min-height: 38px; display: flex; align-items: flex-end; justify-content: center;">
-                    <?php if (!empty($sigPhoto)): ?>
-                        <img src="<?= e(photo_url($sigPhoto)) ?>" alt="Signature" style="max-height: 40px; max-width: 150px; object-fit: contain;">
-                    <?php else: ?>
-                        <span style="font-size: 10px; color: #4b5563;">[ Member Signature on File ]</span>
-                    <?php endif; ?>
+                <div id="printSigArea" style="min-height: 38px; display: flex; align-items: flex-end; justify-content: center;">
+                    <span style="font-size: 10px; color: #4b5563;">[ Member Signature on File ]</span>
                 </div>
                 <div style="border-top: 1px solid #000; margin-top: 3px; padding-top: 2px; font-size: 9.5px; font-weight: bold;">Member's Signature</div>
             </div>
@@ -481,7 +379,7 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
                 <div style="min-height: 38px; display: flex; align-items: flex-end; justify-content: center; font-size: 11px; font-weight: bold; color: #0f766e;">
                     OFFICIAL SYSTEM VERIFIED
                 </div>
-                <div style="border-top: 1px solid #000; margin-top: 3px; padding-top: 2px; font-size: 9.5px; font-weight: bold;">Cooperative Verification &bull; <?= date('m/d/Y') ?></div>
+                <div id="printVerifDate" style="border-top: 1px solid #000; margin-top: 3px; padding-top: 2px; font-size: 9.5px; font-weight: bold;">Cooperative Verification &bull; </div>
             </div>
         </div>
 
@@ -489,8 +387,8 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
     </div>
 
     <!-- Official Printable Document Footer (Print View Only) -->
-    <div class="print-doc-footer">
-        SPACE Cooperative Member Portal &bull; Official Confidential Profile Record &bull; Printed on <?= date('m/d/Y, h:i A') ?>
+    <div id="printFooterDate" class="print-doc-footer">
+        SPACE Cooperative Member Portal &bull; Official Confidential Profile Record &bull; 
     </div>
 </div>
 
@@ -515,11 +413,11 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
       <div class="p-3 rounded mb-2" style="background: var(--input-bg); border: 1px solid var(--bg-card-border); border-radius: 12px;">
         <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px dashed var(--bg-card-border); font-size: 0.85rem;">
           <span style="color: var(--text-dim);">Member Name:</span>
-          <strong style="color: var(--text-main);"><?= e($fullName) ?></strong>
+          <strong id="dlModalMemberName" style="color: var(--text-main);">Loading...</strong>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2 pb-2" style="border-bottom: 1px dashed var(--bg-card-border); font-size: 0.85rem;">
           <span style="color: var(--text-dim);">Account Number:</span>
-          <span class="badge" style="background: rgba(0, 194, 168, 0.15); border: 1px solid var(--primary-teal); color: var(--primary-teal); font-weight: 700;"><?= e($member['account_number']) ?></span>
+          <span id="dlModalAccNo" class="badge" style="background: rgba(0, 194, 168, 0.15); border: 1px solid var(--primary-teal); color: var(--primary-teal); font-weight: 700;">Loading...</span>
         </div>
         <div class="d-flex justify-content-between align-items-center" style="font-size: 0.85rem;">
           <span style="color: var(--text-dim);">Export Format:</span>
@@ -537,6 +435,239 @@ $sigPhoto = !empty($member['signature']) ? $member['signature'] : (!empty($refer
     </div>
   </div>
 </div>
+
+<script type="module">
+import { auth, db } from '../assets/js/firebase-init.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+window.memberDataObj = {}; // For download functionality
+
+function escapeHtml(unsafe) {
+    return (unsafe || '').toString()
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+function calculateAge(birthdayStr) {
+    if (!birthdayStr) return null;
+    const today = new Date();
+    const birthDate = new Date(birthdayStr);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+    }
+    return age;
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return 'Not Specified';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function formatShortDate(dateStr) {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+}
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../login.php';
+        return;
+    }
+    
+    try {
+        let memberId = user.uid;
+        
+        let memberDoc = await getDoc(doc(db, 'member', memberId));
+        let memberData = memberDoc.exists() ? memberDoc.data() : null;
+        
+        if (!memberData) {
+            const q = query(collection(db, 'member'), where('member_id', '==', memberId));
+            const qs = await getDocs(q);
+            if (!qs.empty) {
+                memberData = qs.docs[0].data();
+                memberId = qs.docs[0].id;
+            }
+        }
+        
+        if (!memberData) {
+            if(typeof showToast === 'function') showToast('Member record not found.', 'error');
+            setTimeout(() => { window.location.href = 'dashboard.php'; }, 1500);
+            return;
+        }
+
+        // Fetch related data
+        let accountData = {};
+        const accDoc = await getDoc(doc(db, 'member_account', memberId));
+        if (accDoc.exists()) accountData = accDoc.data();
+
+        let spouseData = {};
+        const spouseQ = query(collection(db, 'spouse'), where('member_id', '==', memberId));
+        const spouseQs = await getDocs(spouseQ);
+        if (!spouseQs.empty) spouseData = spouseQs.docs[0].data();
+
+        let parentsData = {};
+        const parentsQ = query(collection(db, 'parents'), where('member_id', '==', memberId));
+        const parentsQs = await getDocs(parentsQ);
+        if (!parentsQs.empty) parentsData = parentsQs.docs[0].data();
+
+        let children = [];
+        const childrenQ = query(collection(db, 'children'), where('member_id', '==', memberId));
+        const childrenQs = await getDocs(childrenQ);
+        childrenQs.forEach(doc => { children.push(doc.data()); });
+
+        let references = [];
+        const refQ = query(collection(db, 'member_references'), where('member_id', '==', memberId));
+        const refQs = await getDocs(refQ);
+        refQs.forEach(doc => { references.push(doc.data()); });
+
+        // Basic Info Formatting
+        let fullName = escapeHtml((memberData.firstname || '') + ' ' + (memberData.middlename ? memberData.middlename.charAt(0) + '. ' : '') + (memberData.lastname || ''));
+        if (memberData.extension_name) fullName += ' ' + escapeHtml(memberData.extension_name);
+        
+        let memberAge = calculateAge(memberData.birthday);
+        let status = memberData.account_status || 'Active';
+        let accNo = escapeHtml(memberData.account_number || 'N/A');
+
+        // Populate header fields
+        document.getElementById('profFullName').innerText = fullName;
+        document.getElementById('profAccNoTop').innerText = accNo;
+        document.getElementById('profAccNoBadge').innerText = accNo;
+        document.getElementById('profStatusBadge').innerText = status;
+        document.getElementById('profRegDate').innerText = memberData.created_at ? formatDate(memberData.created_at) : 'Active';
+        document.getElementById('printTopAccLabel').innerText = 'ACCOUNT: ' + accNo;
+        document.getElementById('printTopAccDetails').innerHTML = `Account Status: <strong>${status}</strong> &bull; Account No: <strong>${accNo}</strong>`;
+        
+        const photoUrl = memberData.passport_photo ? ('../uploads/' + memberData.passport_photo) : '../assets/images/default-avatar.png';
+        document.getElementById('profPhoto').src = photoUrl;
+
+        let sigPhoto = memberData.signature || (references.length > 0 ? references[0].signature : null);
+        if (sigPhoto) {
+            document.getElementById('profSigContainer').style.display = 'block';
+            document.getElementById('profSigImg').src = '../uploads/' + sigPhoto;
+            document.getElementById('printSigArea').innerHTML = `<img src="../uploads/${sigPhoto}" alt="Signature" style="max-height: 40px; max-width: 150px; object-fit: contain;">`;
+        }
+
+        // Personal Information
+        document.getElementById('profBirthday').innerText = memberData.birthday ? `${formatDate(memberData.birthday)}${memberAge !== null ? ' (' + memberAge + ' Years Old)' : ''}` : 'Not Specified';
+        document.getElementById('profNationality').innerText = escapeHtml(memberData.nationality || 'Filipino');
+        document.getElementById('profSex').innerText = escapeHtml(memberData.sex || 'Not Specified');
+        document.getElementById('profContact').innerText = escapeHtml(memberData.contact_number || 'Not Specified');
+        document.getElementById('profUsername').innerText = escapeHtml(accountData.username || memberData.email || 'N/A');
+        document.getElementById('profCivil').innerText = escapeHtml(memberData.civil_status || 'Single');
+        document.getElementById('profAddress').innerText = escapeHtml(memberData.address || 'Not Specified');
+
+        // Employment Information
+        document.getElementById('profOcc').innerText = escapeHtml(memberData.occupation || 'None');
+        document.getElementById('profEmp').innerText = escapeHtml(memberData.employer || 'None');
+        document.getElementById('profEmpAddr').innerText = escapeHtml(memberData.employer_address || 'None');
+
+        // Parents Information
+        document.getElementById('profFather').innerText = (parentsData && parentsData.father_name && parentsData.father_name.trim() !== '') ? escapeHtml(parentsData.father_name) : 'Not Specified';
+        document.getElementById('profMother').innerText = (parentsData && parentsData.mother_name && parentsData.mother_name.trim() !== '') ? escapeHtml(parentsData.mother_name) : 'Not Specified';
+
+        // Spouse Information
+        if (spouseData && spouseData.spouse_name && spouseData.spouse_name.trim() !== '' && memberData.civil_status !== 'Single') {
+            document.getElementById('spouseSection').style.display = 'block';
+            document.getElementById('spouseName').innerText = escapeHtml(spouseData.spouse_name);
+            document.getElementById('spouseOcc').innerText = (spouseData.occupation && spouseData.occupation.trim() !== '') ? escapeHtml(spouseData.occupation) : 'Not Specified';
+            document.getElementById('spouseEmp').innerText = (spouseData.employer && spouseData.employer.trim() !== '') ? escapeHtml(spouseData.employer) : 'Not Specified';
+        }
+
+        // Children Information
+        let validChildren = children.filter(c => c.child_name && c.child_name.trim() !== '');
+        if (validChildren.length > 0) {
+            document.getElementById('childrenSection').style.display = 'block';
+            let childrenHtml = '';
+            validChildren.forEach((child, idx) => {
+                let cAge = calculateAge(child.birthday);
+                let badgeHtml = cAge !== null ? `<span class="badge" style="background: rgba(0, 242, 254, 0.12); border: 1px solid var(--bg-card-border-glow); color: var(--primary-teal); font-size: 0.72rem; padding: 3px 8px; border-radius: 8px;">${cAge} Years Old</span>` : '';
+                childrenHtml += `
+                    <div class="col-md-6">
+                        <div class="profile-info-tile">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <div class="profile-label mb-0"><i class="fa-solid fa-child text-cyan"></i> Child ${idx + 1}</div>
+                                ${badgeHtml}
+                            </div>
+                            <div class="profile-value mb-1" style="font-size: 0.96rem;">${escapeHtml(child.child_name)}</div>
+                            <div style="color: var(--text-dim); font-size: 0.82rem;">
+                                Birthday: <strong style="color: var(--text-main);">${child.birthday ? formatDate(child.birthday) : 'Not Specified'}</strong>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('childrenList').innerHTML = childrenHtml;
+        }
+
+        // Character References
+        let refHtml = '';
+        for (let i = 0; i < Math.max(2, references.length); i++) {
+            let refName = references[i] && references[i].reference_member_name ? escapeHtml(references[i].reference_member_name.trim()) : 'Not Specified';
+            if (refName === '' && i >= 2) continue; // Skip empty optional refs
+            refName = refName || 'Not Specified';
+            refHtml += `
+                <div class="col-md-6">
+                    <div class="profile-info-tile">
+                        <div class="profile-label"><i class="fa-solid fa-user-check text-cyan"></i> Reference Member ${i + 1}</div>
+                        <div class="profile-value">${refName}</div>
+                    </div>
+                </div>
+            `;
+        }
+        document.getElementById('refList').innerHTML = refHtml;
+
+        // Print dates
+        let td = new Date();
+        let formattedTime = td.toLocaleDateString('en-US', {month: '2-digit', day: '2-digit', year: 'numeric'}) + ', ' + td.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'});
+        document.getElementById('printVerifDate').innerHTML = `Cooperative Verification &bull; ${td.toLocaleDateString('en-US', {month: '2-digit', day: '2-digit', year: 'numeric'})}`;
+        document.getElementById('printFooterDate').innerHTML = `SPACE Cooperative Member Portal &bull; Official Confidential Profile Record &bull; Printed on ${formattedTime}`;
+
+        // Populate Download Modal details
+        document.getElementById('dlModalMemberName').innerText = fullName;
+        document.getElementById('dlModalAccNo').innerText = accNo;
+
+        // Set up memberDataObj for export
+        let childrenStr = validChildren.map(c => {
+            let a = calculateAge(c.birthday);
+            return c.child_name + ' (' + (c.birthday ? formatShortDate(c.birthday) + (a !== null ? ' - ' + a + ' Years Old' : '') : 'N/A') + ')';
+        }).join(', ');
+        
+        let refsStr = references.map(r => (r.reference_member_name || '').trim()).filter(Boolean).join(', ');
+
+        window.memberDataObj = {
+            accNo: accNo,
+            name: fullName,
+            status: status,
+            birthday: memberData.birthday ? `${formatDate(memberData.birthday)}${memberAge !== null ? ' (' + memberAge + ' Years Old)' : ''}` : 'Not Specified',
+            civil: memberData.civil_status || 'Single',
+            sex: memberData.sex || 'Not Specified',
+            nationality: memberData.nationality || 'Filipino',
+            contact: memberData.contact_number || 'Not Specified',
+            email: accountData.username || memberData.email || 'N/A',
+            address: memberData.address || 'Not Specified',
+            occ: memberData.occupation || 'None',
+            emp: memberData.employer || 'None',
+            empAddr: memberData.employer_address || 'None',
+            father: (parentsData && parentsData.father_name) ? parentsData.father_name : 'Not Specified',
+            mother: (parentsData && parentsData.mother_name) ? parentsData.mother_name : 'Not Specified',
+            spouse: (spouseData && spouseData.spouse_name && memberData.civil_status !== 'Single') ? spouseData.spouse_name : '',
+            childrenStr: childrenStr,
+            refsStr: refsStr || 'Not Specified'
+        };
+
+    } catch(err) {
+        console.error("Error loading profile:", err);
+    }
+});
+</script>
 
 <script>
 let currentProfileDownloadFormat = 'pdf';
@@ -688,31 +819,11 @@ function createProfilePdfBlob(memberData) {
 
 function executeProfileDownload() {
     closeDownloadProfileModal();
-    const hasSpouseData = <?= json_encode(!empty(trim($spouse['spouse_name'] ?? '')) && ($member['civil_status'] ?? '') !== 'Single') ?>;
-    const hasChildrenData = <?= json_encode(!empty($validChildren)) ?>;
-    const memberData = {
-        accNo: <?= json_encode($member['account_number']) ?>,
-        name: <?= json_encode($fullName) ?>,
-        status: <?= json_encode($status) ?>,
-        birthday: <?= json_encode($member['birthday'] ? date('F d, Y', strtotime($member['birthday'])) . ($memberAge !== null ? ' (' . $memberAge . ' Years Old)' : '') : 'Not Specified') ?>,
-        civil: <?= json_encode($member['civil_status'] ?? 'Single') ?>,
-        sex: <?= json_encode($member['sex'] ?: 'Not Specified') ?>,
-        nationality: <?= json_encode($member['nationality'] ?: 'Filipino') ?>,
-        contact: <?= json_encode($member['contact_number'] ?: 'Not Specified') ?>,
-        email: <?= json_encode($member['account_username'] ?? ($member['email'] ?? 'N/A')) ?>,
-        address: <?= json_encode($member['address'] ?: 'Not Specified') ?>,
-        occ: <?= json_encode($member['occupation'] ?: 'None') ?>,
-        emp: <?= json_encode($member['employer'] ?: 'None') ?>,
-        empAddr: <?= json_encode($member['employer_address'] ?: 'None') ?>,
-        father: <?= json_encode(!empty(trim($parents['father_name'] ?? '')) ? $parents['father_name'] : 'Not Specified') ?>,
-        mother: <?= json_encode(!empty(trim($parents['mother_name'] ?? '')) ? $parents['mother_name'] : 'Not Specified') ?>,
-        spouse: hasSpouseData ? <?= json_encode($spouse['spouse_name'] ?? '') ?> : '',
-        childrenStr: hasChildrenData ? <?= json_encode(implode(', ', array_map(function($c) { 
-            $cAge = !empty($c['birthday']) ? calculate_age($c['birthday']) : null;
-            return $c['child_name'] . ' (' . ($c['birthday'] ? date('M d, Y', strtotime($c['birthday'])) . ($cAge !== null ? ' - ' . $cAge . ' Years Old' : '') : 'N/A') . ')'; 
-        }, $validChildren ?? []))) ?> : '',
-        refsStr: <?= json_encode(!empty($references) ? implode(', ', array_values(array_filter(array_map(function($r) { return trim($r['reference_member_name'] ?? ''); }, $references)))) : 'Not Specified') ?>
-    };
+    const memberData = window.memberDataObj;
+    if (!memberData || !memberData.accNo) {
+        if(typeof showToast === 'function') showToast('Member data not loaded yet.', 'error');
+        return;
+    }
 
     if (currentProfileDownloadFormat === 'word') {
         let spouseRow = (memberData.spouse && memberData.civil !== 'Single')

@@ -2,28 +2,14 @@
 /**
  * staff/reports.php
  * -------------------------------------------------------
- * Staff Portal — Generate System Reports View.
+ * Staff Portal — Generate System Reports View (Firebase Integrated).
  * -------------------------------------------------------
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_staff();
 
-$selectedCategory = clean($_GET['category'] ?? 'all_combined');
-$selectedScope    = clean($_GET['scope'] ?? 'all_records');
-
-// Calculate Scope Count based on Selected Category
-if ($selectedCategory === 'member_summary' || $selectedCategory === 'General Member Information') {
-    $totalScopeCount = (int) $pdo->query("SELECT COUNT(*) FROM member")->fetchColumn();
-} elseif ($selectedCategory === 'audit_activity' || $selectedCategory === 'System Audit & Staff Action Log') {
-    $totalScopeCount = (int) $pdo->query("SELECT COUNT(*) FROM update_history")->fetchColumn();
-} elseif ($selectedCategory === 'credentials_security' || $selectedCategory === 'Password Security' || $selectedCategory === 'Password Security & Account Lockouts') {
-    $totalScopeCount = (int) $pdo->query("SELECT COUNT(*) FROM member_account")->fetchColumn();
-} elseif ($selectedCategory === 'survey_analytics' || $selectedCategory === 'General Member Survey Feedback Only' || $selectedCategory === 'Cooperative Surveys & Member Feedback') {
-    $totalScopeCount = (int) $pdo->query("SELECT COUNT(*) FROM surveys")->fetchColumn();
-} else {
-    $totalScopeCount = (int) $pdo->query("SELECT COUNT(*) FROM member")->fetchColumn();
-}
+$selectedCategory = $_GET['category'] ?? 'all_combined';
+$selectedScope    = $_GET['scope'] ?? 'all_records';
 
 $pageTitle = 'Generate Reports';
 require_once __DIR__ . '/../pages/header_staff.php';
@@ -50,7 +36,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
         </div>
         <div class="flashcard-back">
           <div class="flashcard-back-content">
-            <h3 class="metric-value" id="reportScopeCount"><?= number_format($totalScopeCount) ?> Member Records</h3>
+            <h3 class="metric-value" id="reportScopeCountDynamic">Loading...</h3>
             <span class="metric-subtext positive"><i class="fa-solid fa-check"></i> Actively Compiled</span>
           </div>
         </div>
@@ -319,3 +305,34 @@ require_once __DIR__ . '/../pages/header_staff.php';
 </script>
 
 <?php require_once __DIR__ . '/../pages/footer_staff.php'; ?>
+
+<script type="module">
+import { app, db, auth } from '../assets/js/firebase-init.js';
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../login.php';
+        return;
+    }
+    
+    // Fetch count for the reports
+    try {
+        const snapshot = await getDocs(collection(db, 'member'));
+        const count = snapshot.size;
+        const el = document.getElementById('reportScopeCountDynamic');
+        if (el) {
+            el.innerText = count + ' Member Records';
+        }
+    } catch (error) {
+        console.error("Error fetching report counts: ", error);
+        const el = document.getElementById('reportScopeCountDynamic');
+        if (el) {
+            el.innerText = 'Error loading records';
+        }
+    }
+});
+</script>
+
+

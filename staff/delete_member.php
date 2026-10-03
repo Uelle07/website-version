@@ -2,60 +2,64 @@
 /**
  * staff/delete_member.php
  * -------------------------------------------------------
- * Staff Portal — Delete Member Handler.
+ * Staff Portal — Delete Member Handler (Firebase Integrated).
  * -------------------------------------------------------
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_staff();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verify_csrf($_POST['csrf_token'] ?? '');
+$accNo = $_POST['account_number'] ?? '';
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Deleting Member...</title>
+</head>
+<body>
+    <p>Processing request...</p>
+    <script type="module">
+        import { app, db, auth } from '../assets/js/firebase-init.js';
+        import { collection, query, where, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-    $accNo = clean($_POST['account_number'] ?? '');
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                window.location.href = '../login.php';
+                return;
+            }
 
-    // Fetch member by account number
-    $stmt = $pdo->prepare("SELECT member_id, firstname, lastname, account_status FROM member WHERE account_number = ?");
-    $stmt->execute([$accNo]);
-    $member = $stmt->fetch();
+            const accNo = "<?= htmlspecialchars($accNo, ENT_QUOTES) ?>";
+            if (!accNo) {
+                window.location.href = 'members.php';
+                return;
+            }
 
-    if ($member) {
-        $rawStatus = strtolower($member['account_status'] ?? '');
-        if ($rawStatus === 'inactive' || $rawStatus === 'deleted') {
-            set_flash('error', 'Member account ' . $accNo . ' is already inactive and cannot be deleted.');
-            redirect('staff/members.php');
-        }
+            try {
+                const q = query(collection(db, 'member'), where('account_number', '==', accNo));
+                const snapshot = await getDocs(q);
+                if (!snapshot.empty) {
+                    const memberDoc = snapshot.docs[0];
+                    if (memberDoc.data().account_status !== 'Inactive') {
+                        await updateDoc(doc(db, 'members', memberDoc.id), {
+                            account_status: 'Inactive'
+                        });
+                        alert('Member record ' + accNo + ' removed and labeled as Inactive.');
+                    } else {
+                        alert('Member account ' + accNo + ' is already inactive and cannot be deleted.');
+                    }
+                } else {
+                    alert('Member record not found.');
+                }
+            } catch (error) {
+                console.error("Error deleting member:", error);
+                alert('Failed to update member record status.');
+            }
 
-        $memberId = (int) $member['member_id'];
+            window.location.href = 'members.php';
+        });
+    </script>
+</body>
+</html>
 
-        try {
-            $pdo->beginTransaction();
 
-            // Log removal to update_history before marking as inactive
-            $hist = $pdo->prepare(
-                "INSERT INTO update_history (member_id, updated_by_staff_id, update_type, remarks)
-                 VALUES (?, ?, 'Removed Member from Portal', 'Staff removed member record and marked status as Inactive.')"
-            );
-            $hist->execute([$memberId, current_user_id()]);
-
-            // Set member account_status to Inactive
-            $del = $pdo->prepare("UPDATE member SET account_status = 'Inactive' WHERE member_id = ?");
-            $del->execute([$memberId]);
-
-            // Clear any active lockout and failed attempts
-            $clearLock = $pdo->prepare("UPDATE member_account SET failed_attempts = 0, locked_until = NULL WHERE member_id = ?");
-            $clearLock->execute([$memberId]);
-
-            $pdo->commit();
-
-            set_flash('success', 'Member record ' . $accNo . ' removed and labeled as Inactive.');
-        } catch (PDOException $e) {
-            $pdo->rollBack();
-            set_flash('error', 'Failed to update member record status.');
-        }
-    } else {
-        set_flash('error', 'Member record not found.');
-    }
-}
-
-redirect('staff/members.php');

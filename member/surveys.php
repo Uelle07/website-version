@@ -9,49 +9,11 @@
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_member();
-
-$memberId = current_user_id();
-
-// Automatically sync and mark expired active surveys as closed
-sync_expired_surveys($pdo);
-
-// 1. Fetch all ACTIVE surveys within the valid date range
-$activeStmt = $pdo->prepare(
-    "SELECT s.*,
-            (SELECT COUNT(*) FROM survey_questions sq WHERE sq.survey_id = s.survey_id) AS total_questions,
-            (SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.survey_id AND r.member_id = ?) AS response_count,
-            (SELECT COUNT(DISTINCT r.question_id) FROM responses r WHERE r.survey_id = s.survey_id AND r.member_id = ?) AS answered_questions
-     FROM surveys s
-     WHERE s.status = 'active' 
-       AND (s.end_date >= NOW() OR s.end_date IS NULL)
-     ORDER BY s.end_date ASC, s.survey_id DESC"
-);
-$activeStmt->execute([$memberId, $memberId]);
-$activeSurveys = $activeStmt->fetchAll();
-
-// Calculate available count (active minus already submitted)
-$availableSurveys = array_values(array_filter($activeSurveys, fn($s) => (int)($s['response_count'] ?? 0) === 0));
-$availableCount = count($availableSurveys);
-$completedActiveCount = count($activeSurveys) - $availableCount;
-
-// 2. Fetch COMPLETED survey history submitted by this member
-$completedStmt = $pdo->prepare(
-    "SELECT s.*,
-            MAX(r.submitted_at) AS submitted_at
-     FROM surveys s
-     INNER JOIN responses r ON r.survey_id = s.survey_id AND r.member_id = ?
-     GROUP BY s.survey_id
-     ORDER BY submitted_at DESC"
-);
-$completedStmt->execute([$memberId]);
-$completedSurveys = $completedStmt->fetchAll();
-
 $pageTitle = 'Cooperative Surveys';
 require_once __DIR__ . '/../pages/header.php';
 ?>
 
-<div class="dashboard-wrapper">
+<div class="dashboard-wrapper" style="display: none;" id="mainContent">
     <!-- Top Action Navigation -->
     <div class="d-flex justify-content-between align-items-center mb-3 no-print">
         <a href="dashboard.php" class="btn btn-outline-light btn-sm d-inline-flex align-items-center gap-2" style="border-radius: 20px; padding: 6px 16px; backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.08); border-color: rgba(255,255,255,0.2);">
@@ -74,7 +36,7 @@ require_once __DIR__ . '/../pages/header.php';
                 </div>
                 <h2>Cooperative Surveys</h2>
                 <div class="meta-details">
-                    <span><i class="fa-solid fa-circle-check text-cyan"></i> <?= $availableCount ?> Available Survey<?= $availableCount === 1 ? '' : 's' ?></span>
+                    <span><i class="fa-solid fa-circle-check text-cyan"></i> <span id="availableCount">0</span> Available Survey(s)</span>
                     <span><i class="fa-solid fa-shield-halved" style="color: #10b981;"></i> Member Participation Portal</span>
                 </div>
             </div>
@@ -89,109 +51,50 @@ require_once __DIR__ . '/../pages/header.php';
         </div>
         <div class="survey-filter-chips">
             <button type="button" class="filter-chip active" data-filter="all" onclick="setSurveyFilter('all', this)">
-                <i class="fa-solid fa-border-all"></i> All (<?= count($activeSurveys) ?>)
+                <i class="fa-solid fa-border-all"></i> All (<span id="allCount">0</span>)
             </button>
             <button type="button" class="filter-chip" data-filter="available" onclick="setSurveyFilter('available', this)">
-                <i class="fa-solid fa-bolt text-cyan"></i> Available to Take (<?= $availableCount ?>)
+                <i class="fa-solid fa-bolt text-cyan"></i> Available to Take (<span id="filterAvailableCount">0</span>)
             </button>
             <button type="button" class="filter-chip" data-filter="completed" onclick="setSurveyFilter('completed', this)">
-                <i class="fa-solid fa-check-double text-success"></i> Completed (<?= $completedActiveCount ?>)
+                <i class="fa-solid fa-check-double text-success"></i> Completed (<span id="completedActiveCount">0</span>)
             </button>
         </div>
-    </div>    <!-- Section: Active & Available Surveys Grid -->
+    </div>    
+
+    <!-- Section: Active & Available Surveys Grid -->
     <div class="mb-4">
         <div class="grid-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <h3 style="margin: 0; font-weight: 800; font-size: 1.25rem; color: var(--text-main);">Questionnaires</h3>
             <div class="available-surveys-badge" title="Total active questionnaires currently open for your participation">
                 <i class="fa-solid fa-layer-group"></i>
                 <span>Available to Take:</span>
-                <span class="badge-count" id="availableBadgeCount"><?= $availableCount ?></span>
+                <span class="badge-count" id="availableBadgeCount">0</span>
             </div>
         </div>
 
-        <?php if (empty($activeSurveys)): ?>
-            <div class="card text-center py-5" style="background: var(--bg-card); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px dashed var(--bg-card-border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
-                <div class="card-body">
-                    <i class="fa-solid fa-clipboard-check mb-3" style="font-size: 2.8rem; color: var(--primary-teal); opacity: 0.4;"></i>
-                    <h4 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.4rem;">No Active Surveys Available</h4>
-                    <p style="color: var(--text-dim); font-size: 0.9rem; max-width: 450px; margin: 0 auto;">
-                        There are currently no active surveys scheduled for member participation. Please check back later for new cooperative inquiries.
-                    </p>
-                </div>
+        <div id="noActiveSurveys" class="card text-center py-5" style="display: none; background: var(--bg-card); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px dashed var(--bg-card-border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
+            <div class="card-body">
+                <i class="fa-solid fa-clipboard-check mb-3" style="font-size: 2.8rem; color: var(--primary-teal); opacity: 0.4;"></i>
+                <h4 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.4rem;">No Active Surveys Available</h4>
+                <p style="color: var(--text-dim); font-size: 0.9rem; max-width: 450px; margin: 0 auto;">
+                    There are currently no active surveys scheduled for member participation. Please check back later for new cooperative inquiries.
+                </p>
             </div>
-        <?php else: ?>
-            <div class="row g-4" id="surveysContainer">
-                <?php foreach ($activeSurveys as $survey): ?>
-                    <?php 
-                        $isAnswered = ((int)($survey['response_count'] ?? 0) > 0);
-                        $statusClass = $isAnswered ? 'survey-completed' : 'survey-available';
-                    ?>
-                    <div class="col-md-6 col-lg-6 survey-item-wrapper <?= $statusClass ?>" 
-                         data-status="<?= $isAnswered ? 'completed' : 'available' ?>"
-                         data-title="<?= strtolower(e($survey['title'])) ?>"
-                         data-desc="<?= strtolower(e($survey['description'] ?? '')) ?>">
-                        <div class="tile-card h-100" style="min-height: 240px; cursor: default;">
-                            <div>
-                                <!-- Top Status & Dates Bar -->
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; flex-wrap: wrap;">
-                                    <?php if ($isAnswered): ?>
-                                        <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;">
-                                            <i class="fa-solid fa-circle-check"></i> Completed
-                                        </span>
-                                    <?php else: ?>
-                                        <span style="background: rgba(0, 194, 168, 0.15); color: var(--primary-teal); border: 1px solid rgba(0, 194, 168, 0.35); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;">
-                                            <i class="fa-solid fa-bolt"></i> Open for Responses
-                                        </span>
-                                    <?php endif; ?>
+        </div>
+        
+        <div class="row g-4" id="surveysContainer">
+            <!-- Active surveys will be injected here -->
+        </div>
 
-                                    <div style="font-size: 0.78rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px;">
-                                        <i class="fa-solid fa-calendar-days" style="color: var(--primary-teal);"></i>
-                                        <span><?= date('M d, Y g:i A', strtotime($survey['start_date'])) ?> &ndash; <?= date('M d, Y g:i A', strtotime($survey['end_date'])) ?></span>
-                                    </div>
-                                </div>
-
-                                <!-- Survey Title & Description -->
-                                <div class="tile-content">
-                                    <h4 class="survey-title-text" style="font-size: 1.15rem; margin-bottom: 8px; color: var(--text-main);">
-                                        <?= e($survey['title']) ?>
-                                    </h4>
-                                    <p class="survey-desc-text" style="color: var(--text-dim); font-size: 0.88rem; line-height: 1.5; margin-bottom: 16px;">
-                                        <?= e($survey['description'] ?: 'No additional description provided for this survey.') ?>
-                                    </p>
-                                </div>
-                            </div>
-
-                            <!-- Survey Footer Action -->
-                            <div style="padding-top: 14px; border-top: 1px solid var(--bg-card-border); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-                                <div style="font-size: 0.82rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px;">
-                                    <i class="fa-solid fa-list-check" style="color: var(--primary-teal);"></i>
-                                    <span><?= (int)$survey['total_questions'] ?> Question<?= (int)$survey['total_questions'] === 1 ? '' : 's' ?></span>
-                                </div>
-
-                                <?php if ($isAnswered): ?>
-                                    <button type="button" class="btn btn-secondary btn-sm" disabled aria-disabled="true" tabindex="-1" style="opacity: 0.75; border-radius: 10px; padding: 7px 16px; font-weight: 600; font-size: 0.82rem; cursor: not-allowed; pointer-events: none;">
-                                        <i class="fa-solid fa-check-double me-1"></i> Already Submitted
-                                    </button>
-                                <?php else: ?>
-                                    <a href="take_survey.php?id=<?= (int)$survey['survey_id'] ?>" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-2" style="border-radius: 10px; padding: 7px 18px; font-weight: 700; font-size: 0.85rem; text-decoration: none;">
-                                        <span>Answer Survey</span> <i class="fa-solid fa-arrow-right"></i>
-                                    </a>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
+        <!-- Empty Search Results Message -->
+        <div id="noSearchSurveysFound" class="card text-center py-5" style="display: none; background: var(--bg-card); backdrop-filter: blur(14px); border: 1px dashed var(--bg-card-border); border-radius: 16px;">
+            <div class="card-body">
+                <i class="fa-solid fa-magnifying-glass mb-3" style="font-size: 2.2rem; color: var(--primary-teal); opacity: 0.5;"></i>
+                <h5 style="color: var(--text-main); font-weight: 700;">No Matching Surveys Found</h5>
+                <p style="color: var(--text-dim); font-size: 0.88rem; margin: 0;">Try adjusting your keyword search or active filter chip.</p>
             </div>
-
-            <!-- Empty Search Results Message -->
-            <div id="noSearchSurveysFound" class="card text-center py-5" style="display: none; background: var(--bg-card); backdrop-filter: blur(14px); border: 1px dashed var(--bg-card-border); border-radius: 16px;">
-                <div class="card-body">
-                    <i class="fa-solid fa-magnifying-glass mb-3" style="font-size: 2.2rem; color: var(--primary-teal); opacity: 0.5;"></i>
-                    <h5 style="color: var(--text-main); font-weight: 700;">No Matching Surveys Found</h5>
-                    <p style="color: var(--text-dim); font-size: 0.88rem; margin: 0;">Try adjusting your keyword search or active filter chip.</p>
-                </div>
-            </div>
-        <?php endif; ?>
+        </div>
     </div>
 
     <!-- Section Divider separating Questionnaires and Survey History Log -->
@@ -211,7 +114,7 @@ require_once __DIR__ . '/../pages/header.php';
                     <i class="fa-solid fa-clock-rotate-left text-cyan"></i> Survey History Log
                 </h3>
                 <span class="history-status-badge">
-                    <i class="fa-solid fa-circle-check"></i> <span id="historyTotalCount"><?= count($completedSurveys) ?></span> Submitted Survey<?= count($completedSurveys) === 1 ? '' : 's' ?>
+                    <i class="fa-solid fa-circle-check"></i> <span id="historyTotalCount">0</span> Submitted Survey(s)
                 </span>
             </div>
             <p class="survey-history-subtext">
@@ -219,15 +122,15 @@ require_once __DIR__ . '/../pages/header.php';
             </p>
         </div>
 
-        <?php if (empty($completedSurveys)): ?>
-            <div class="card-body text-center py-5">
-                <i class="fa-solid fa-inbox mb-3" style="font-size: 2.4rem; color: var(--primary-teal); opacity: 0.4;"></i>
-                <h5 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.35rem;">No Survey History Yet</h5>
-                <p style="color: var(--text-dim); font-size: 0.88rem; max-width: 440px; margin: 0 auto;">
-                    You have not submitted any survey responses yet. Take an active questionnaire above to participate and your submission logs will appear here.
-                </p>
-            </div>
-        <?php else: ?>
+        <div id="noHistory" class="card-body text-center py-5" style="display: none;">
+            <i class="fa-solid fa-inbox mb-3" style="font-size: 2.4rem; color: var(--primary-teal); opacity: 0.4;"></i>
+            <h5 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.35rem;">No Survey History Yet</h5>
+            <p style="color: var(--text-dim); font-size: 0.88rem; max-width: 440px; margin: 0 auto;">
+                You have not submitted any survey responses yet. Take an active questionnaire above to participate and your submission logs will appear here.
+            </p>
+        </div>
+        
+        <div id="historyContainer" style="display: none;">
             <!-- History Toolbar with Search & Filter -->
             <div class="history-filter-toolbar">
                 <div class="history-search-box">
@@ -236,7 +139,7 @@ require_once __DIR__ . '/../pages/header.php';
                 </div>
                 <div class="history-filter-btn-group">
                     <button type="button" class="history-filter-btn active" data-hfilter="all" onclick="setHistoryFilter('all', this)">
-                        <i class="fa-solid fa-list-ul"></i> All History (<?= count($completedSurveys) ?>)
+                        <i class="fa-solid fa-list-ul"></i> All History (<span id="historyAllCount">0</span>)
                     </button>
                     <button type="button" class="history-filter-btn" data-hfilter="recent" onclick="setHistoryFilter('recent', this)">
                         <i class="fa-solid fa-calendar-day text-cyan"></i> Last 30 Days
@@ -257,40 +160,7 @@ require_once __DIR__ . '/../pages/header.php';
                         </tr>
                     </thead>
                     <tbody id="historyTableBody">
-                        <?php foreach ($completedSurveys as $past): ?>
-                            <?php 
-                                $subTime = strtotime($past['submitted_at']);
-                                $isRecent = (time() - $subTime) <= (30 * 86400);
-                                $isThisYear = (date('Y', $subTime) === date('Y'));
-                            ?>
-                            <tr class="history-row-item" 
-                                data-title="<?= strtolower(e($past['title'])) ?>"
-                                data-recent="<?= $isRecent ? 'true' : 'false' ?>"
-                                data-year="<?= $isThisYear ? 'true' : 'false' ?>">
-                                <td>
-                                    <div class="history-survey-title">
-                                        <i class="fa-solid fa-file-lines text-cyan" style="font-size: 0.95rem;"></i>
-                                        <span><?= e($past['title']) ?></span>
-                                    </div>
-                                    <?php if (!empty($past['description'])): ?>
-                                        <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 3px; padding-left: 24px;">
-                                            <?= e(mb_strimwidth($past['description'], 0, 90, '...')) ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <span class="history-status-badge">
-                                        <i class="fa-solid fa-check-double"></i> Completed
-                                    </span>
-                                </td>
-                                <td class="text-end">
-                                    <div class="history-date-badge">
-                                        <i class="fa-solid fa-calendar-check text-cyan"></i>
-                                        <span><?= date('M d, Y · h:i A', $subTime) ?></span>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
+                        <!-- History items will be injected here -->
                     </tbody>
                 </table>
             </div>
@@ -301,21 +171,227 @@ require_once __DIR__ . '/../pages/header.php';
                     <i class="fa-solid fa-filter-circle-xmark me-1 text-cyan"></i> No submitted surveys match your current history filter.
                 </p>
             </div>
-        <?php endif; ?>
+        </div>
     </div>
 </div>
 
-<script>
-let currentFilter = 'all';
+<script type="module">
+    import { auth, db } from '../assets/js/firebase-init.js';
+    import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { collection, query, where, getDocs, orderBy, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
-function setSurveyFilter(filter, btn) {
-    currentFilter = filter;
+    onAuthStateChanged(auth, async (user) => {
+        if (!user) {
+            window.location.href = '../login.php';
+            return;
+        }
+
+        document.getElementById('mainContent').style.display = 'block';
+
+        const memberId = user.uid;
+
+        try {
+            // Fetch surveys
+            const surveysRef = collection(db, 'surveys');
+            const surveysSnapshot = await getDocs(surveysRef);
+            let activeSurveys = [];
+            let allSurveys = {};
+
+            const now = new Date();
+            
+            surveysSnapshot.forEach(doc => {
+                const data = doc.data();
+                data.id = doc.id;
+                allSurveys[doc.id] = data;
+                if (data.status === 'active' && (!data.end_date || new Date(data.end_date) >= now)) {
+                    activeSurveys.push(data);
+                }
+            });
+
+            // Sort active surveys by end date asc, then id desc
+            activeSurveys.sort((a, b) => {
+                if(a.end_date && b.end_date) {
+                    return new Date(a.end_date) - new Date(b.end_date);
+                }
+                return 0;
+            });
+
+            // Fetch responses for this member
+            const responsesRef = collection(db, 'responses');
+            const responsesQuery = query(responsesRef, where('member_id', '==', memberId));
+            const responsesSnapshot = await getDocs(responsesQuery);
+            
+            let respondedSurveyIds = new Set();
+            let responsesBySurvey = {};
+
+            responsesSnapshot.forEach(docSnap => {
+                const data = docSnap.data();
+                respondedSurveyIds.add(data.survey_id);
+                
+                if (!responsesBySurvey[data.survey_id]) {
+                    responsesBySurvey[data.survey_id] = { submitted_at: data.submitted_at };
+                } else if (data.submitted_at > responsesBySurvey[data.survey_id].submitted_at) {
+                    responsesBySurvey[data.survey_id].submitted_at = data.submitted_at;
+                }
+            });
+
+            let availableCount = 0;
+            let completedActiveCount = 0;
+            const surveysContainer = document.getElementById('surveysContainer');
+            
+            if (activeSurveys.length === 0) {
+                document.getElementById('noActiveSurveys').style.display = 'block';
+            } else {
+                for (const survey of activeSurveys) {
+                    const isAnswered = respondedSurveyIds.has(survey.id);
+                    if (isAnswered) {
+                        completedActiveCount++;
+                    } else {
+                        availableCount++;
+                    }
+
+                    // Fetch total questions for this survey
+                    const questionsRef = collection(db, 'survey_questions');
+                    const qQuery = query(questionsRef, where('survey_id', '==', survey.id));
+                    const qSnapshot = await getDocs(qQuery);
+                    const totalQuestions = qSnapshot.size;
+
+                    const statusClass = isAnswered ? 'survey-completed' : 'survey-available';
+                    const sDataStatus = isAnswered ? 'completed' : 'available';
+                    const titleEsc = survey.title.replace(/"/g, '&quot;');
+                    const descEsc = (survey.description || '').replace(/"/g, '&quot;');
+                    const startDateFormatted = new Date(survey.start_date).toLocaleString();
+                    const endDateFormatted = survey.end_date ? new Date(survey.end_date).toLocaleString() : 'No End Date';
+
+                    let statusBadge = isAnswered 
+                        ? `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;"><i class="fa-solid fa-circle-check"></i> Completed</span>`
+                        : `<span style="background: rgba(0, 194, 168, 0.15); color: var(--primary-teal); border: 1px solid rgba(0, 194, 168, 0.35); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;"><i class="fa-solid fa-bolt"></i> Open for Responses</span>`;
+                    
+                    let actionButton = isAnswered
+                        ? `<button type="button" class="btn btn-secondary btn-sm" disabled aria-disabled="true" tabindex="-1" style="opacity: 0.75; border-radius: 10px; padding: 7px 16px; font-weight: 600; font-size: 0.82rem; cursor: not-allowed; pointer-events: none;"><i class="fa-solid fa-check-double me-1"></i> Already Submitted</button>`
+                        : `<a href="take_survey.php?id=${survey.id}" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-2" style="border-radius: 10px; padding: 7px 18px; font-weight: 700; font-size: 0.85rem; text-decoration: none;"><span>Answer Survey</span> <i class="fa-solid fa-arrow-right"></i></a>`;
+
+                    const html = `
+                    <div class="col-md-6 col-lg-6 survey-item-wrapper ${statusClass}" 
+                         data-status="${sDataStatus}"
+                         data-title="${survey.title.toLowerCase()}"
+                         data-desc="${(survey.description || '').toLowerCase()}">
+                        <div class="tile-card h-100" style="min-height: 240px; cursor: default;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; flex-wrap: wrap;">
+                                    ${statusBadge}
+                                    <div style="font-size: 0.78rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px;">
+                                        <i class="fa-solid fa-calendar-days" style="color: var(--primary-teal);"></i>
+                                        <span>${startDateFormatted} &ndash; ${endDateFormatted}</span>
+                                    </div>
+                                </div>
+                                <div class="tile-content">
+                                    <h4 class="survey-title-text" style="font-size: 1.15rem; margin-bottom: 8px; color: var(--text-main);">
+                                        ${survey.title}
+                                    </h4>
+                                    <p class="survey-desc-text" style="color: var(--text-dim); font-size: 0.88rem; line-height: 1.5; margin-bottom: 16px;">
+                                        ${survey.description || 'No additional description provided for this survey.'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div style="padding-top: 14px; border-top: 1px solid var(--bg-card-border); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+                                <div style="font-size: 0.82rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px;">
+                                    <i class="fa-solid fa-list-check" style="color: var(--primary-teal);"></i>
+                                    <span>${totalQuestions} Question${totalQuestions === 1 ? '' : 's'}</span>
+                                </div>
+                                ${actionButton}
+                            </div>
+                        </div>
+                    </div>`;
+                    surveysContainer.insertAdjacentHTML('beforeend', html);
+                }
+            }
+
+            document.getElementById('availableCount').textContent = availableCount;
+            document.getElementById('allCount').textContent = activeSurveys.length;
+            document.getElementById('filterAvailableCount').textContent = availableCount;
+            document.getElementById('completedActiveCount').textContent = completedActiveCount;
+            document.getElementById('availableBadgeCount').textContent = availableCount;
+
+            // Generate history logs
+            let completedSurveysCount = 0;
+            const historyTableBody = document.getElementById('historyTableBody');
+            
+            const historyKeys = Object.keys(responsesBySurvey);
+            
+            if (historyKeys.length === 0) {
+                document.getElementById('noHistory').style.display = 'block';
+            } else {
+                document.getElementById('historyContainer').style.display = 'block';
+                
+                let historyArray = historyKeys.map(sid => {
+                    return {
+                        survey_id: sid,
+                        submitted_at: responsesBySurvey[sid].submitted_at,
+                        surveyData: allSurveys[sid]
+                    };
+                }).filter(h => h.surveyData != null);
+                
+                historyArray.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+                
+                completedSurveysCount = historyArray.length;
+                document.getElementById('historyTotalCount').textContent = completedSurveysCount;
+                document.getElementById('historyAllCount').textContent = completedSurveysCount;
+
+                for (const h of historyArray) {
+                    const subTime = new Date(h.submitted_at);
+                    const isRecent = (now - subTime) <= (30 * 86400 * 1000);
+                    const isThisYear = subTime.getFullYear() === now.getFullYear();
+
+                    let descHtml = '';
+                    if (h.surveyData.description) {
+                        const truncDesc = h.surveyData.description.length > 90 ? h.surveyData.description.substring(0, 90) + '...' : h.surveyData.description;
+                        descHtml = `<div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 3px; padding-left: 24px;">${truncDesc}</div>`;
+                    }
+
+                    const html = `
+                    <tr class="history-row-item" 
+                        data-title="${h.surveyData.title.toLowerCase()}"
+                        data-recent="${isRecent ? 'true' : 'false'}"
+                        data-year="${isThisYear ? 'true' : 'false'}">
+                        <td>
+                            <div class="history-survey-title">
+                                <i class="fa-solid fa-file-lines text-cyan" style="font-size: 0.95rem;"></i>
+                                <span>${h.surveyData.title}</span>
+                            </div>
+                            ${descHtml}
+                        </td>
+                        <td>
+                            <span class="history-status-badge">
+                                <i class="fa-solid fa-check-double"></i> Completed
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <div class="history-date-badge">
+                                <i class="fa-solid fa-calendar-check text-cyan"></i>
+                                <span>${subTime.toLocaleString()}</span>
+                            </div>
+                        </td>
+                    </tr>`;
+                    historyTableBody.insertAdjacentHTML('beforeend', html);
+                }
+            }
+
+        } catch(e) {
+            console.error("Error fetching surveys: ", e);
+        }
+    });
+
+window.currentFilter = 'all';
+
+window.setSurveyFilter = function(filter, btn) {
+    window.currentFilter = filter;
     document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    filterSurveys();
+    window.filterSurveys();
 }
 
-function filterSurveys() {
+window.filterSurveys = function() {
     const query = (document.getElementById('surveySearchInput')?.value || '').toLowerCase().trim();
     const items = document.querySelectorAll('.survey-item-wrapper');
     let visibleCount = 0;
@@ -325,7 +401,7 @@ function filterSurveys() {
         const itemTitle = item.getAttribute('data-title') || '';
         const itemDesc = item.getAttribute('data-desc') || '';
 
-        const matchesFilter = (currentFilter === 'all') || (currentFilter === itemStatus);
+        const matchesFilter = (window.currentFilter === 'all') || (window.currentFilter === itemStatus);
         const matchesQuery = !query || itemTitle.includes(query) || itemDesc.includes(query);
 
         if (matchesFilter && matchesQuery) {
@@ -342,16 +418,16 @@ function filterSurveys() {
     }
 }
 
-let currentHistoryFilter = 'all';
+window.currentHistoryFilter = 'all';
 
-function setHistoryFilter(filter, btn) {
-    currentHistoryFilter = filter;
+window.setHistoryFilter = function(filter, btn) {
+    window.currentHistoryFilter = filter;
     document.querySelectorAll('.history-filter-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    filterHistorySurveys();
+    window.filterHistorySurveys();
 }
 
-function filterHistorySurveys() {
+window.filterHistorySurveys = function() {
     const query = (document.getElementById('historySearchInput')?.value || '').toLowerCase().trim();
     const rows = document.querySelectorAll('.history-row-item');
     let visibleCount = 0;
@@ -362,8 +438,8 @@ function filterHistorySurveys() {
         const isYear = row.getAttribute('data-year') === 'true';
 
         let matchesFilter = true;
-        if (currentHistoryFilter === 'recent') matchesFilter = isRecent;
-        if (currentHistoryFilter === 'year') matchesFilter = isYear;
+        if (window.currentHistoryFilter === 'recent') matchesFilter = isRecent;
+        if (window.currentHistoryFilter === 'year') matchesFilter = isYear;
 
         const matchesQuery = !query || title.includes(query);
 
@@ -383,3 +459,4 @@ function filterHistorySurveys() {
 </script>
 
 <?php require_once __DIR__ . '/../pages/footer.php'; ?>
+

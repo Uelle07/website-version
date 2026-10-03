@@ -1,442 +1,18 @@
 <?php
-/**
- * staff/survey_questions.php
- * -------------------------------------------------------
- * Staff Portal — Survey Question & Choice Builder (SET B)
- * Manage questions, choices, and question ordering for a survey.
- * -------------------------------------------------------
- */
-
 require_once __DIR__ . '/../config/init.php';
-require_staff();
+$surveyId = $_GET['id'] ?? '';
+$pageTitle = 'Manage Questions';
 
-$surveyId = (int)($_GET['id'] ?? $_POST['survey_id'] ?? 0);
-
-if ($surveyId <= 0) {
-    set_flash('error', 'Invalid survey requested.');
-    redirect('staff/surveys.php');
-}
-
-// Automatically sync and mark expired active surveys as closed
-sync_expired_surveys($pdo);
-
-// 1. Fetch Survey Details
-$stmt = $pdo->prepare("SELECT * FROM surveys WHERE survey_id = ? LIMIT 1");
-$stmt->execute([$surveyId]);
-$survey = $stmt->fetch();
-
-if (!$survey) {
-    set_flash('error', 'Survey not found.');
-    redirect('staff/surveys.php');
-}
-
-$isPublished = ($survey['status'] !== 'draft');
-$errors = [];
-
-// =========================================================
-// 2. HANDLE POST ACTIONS (ADD, EDIT, DELETE QUESTIONS)
-// =========================================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verify_csrf($_POST['csrf_token'] ?? '');
-    $action = $_POST['action'] ?? '';
-
-    // --- A. ADD NEW QUESTION ---
-    if ($action === 'add_question') {
-        if ($isPublished) {
-            $errors[] = 'Questions cannot be added anymore once a survey has been published.';
-        }
-        $questionText = trim($_POST['question'] ?? '');
-        $questionType = trim($_POST['question_type'] ?? 'multiple_choice');
-        $rawChoices   = $_POST['choices'] ?? [];
-
-        if ($questionText === '') {
-            $errors[] = 'Question text is required.';
-        }
-        if (!in_array($questionType, ['multiple_choice', 'yes_no', 'rating', 'short_answer'], true)) {
-            $questionType = 'multiple_choice';
-        }
-
-        // Clean choices
-        $cleanChoices = [];
-        if ($questionType === 'yes_no') {
-            $cleanChoices = ['Yes', 'No'];
-        } elseif ($questionType === 'rating') {
-            $cleanChoices = ['1 - Poor', '2 - Fair', '3 - Good', '4 - Very Good', '5 - Excellent'];
-        } elseif ($questionType === 'multiple_choice') {
-            foreach ($rawChoices as $c) {
-                $cVal = trim((string)$c);
-                if ($cVal !== '') {
-                    $cleanChoices[] = $cVal;
-                }
-            }
-            if (count($cleanChoices) < 2) {
-                $errors[] = 'Multiple choice questions require at least 2 option choices.';
-            }
-        }
-
-        if (empty($errors)) {
-            try {
-                $pdo->beginTransaction();
-
-                // Compute next question order
-                $orderStmt = $pdo->prepare("SELECT COALESCE(MAX(question_order), 0) + 1 FROM survey_questions WHERE survey_id = ?");
-                $orderStmt->execute([$surveyId]);
-                $nextOrder = (int)$orderStmt->fetchColumn();
-
-                $qInsert = $pdo->prepare(
-                    "INSERT INTO survey_questions (survey_id, question, question_type, question_order)
-                     VALUES (?, ?, ?, ?)"
-                );
-                $qInsert->execute([$surveyId, $questionText, $questionType, $nextOrder]);
-                $newQuestionId = (int)$pdo->lastInsertId();
-
-                // Insert choices if applicable
-                if (!empty($cleanChoices)) {
-                    $cInsert = $pdo->prepare(
-                        "INSERT INTO survey_choices (question_id, choice_text, choice_order)
-                         VALUES (?, ?, ?)"
-                    );
-                    foreach ($cleanChoices as $cIdx => $choiceText) {
-                        $cInsert->execute([$newQuestionId, $choiceText, $cIdx + 1]);
-                    }
-                }
-
-                $pdo->commit();
-
-                set_flash('success', 'Question added successfully.');
-                redirect("staff/survey_questions.php?id={$surveyId}");
-            } catch (Exception $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                $errors[] = 'Failed to add question: ' . $e->getMessage();
-            }
-        }
-    }
-
-    // --- B. EDIT EXISTING QUESTION ---
-    elseif ($action === 'edit_question') {
-        if ($isPublished) {
-            $errors[] = 'Questions cannot be edited anymore once a survey has been published.';
-        }
-        $questionId   = (int)($_POST['question_id'] ?? 0);
-        $questionText = trim($_POST['question'] ?? '');
-        $questionType = trim($_POST['question_type'] ?? 'multiple_choice');
-        $rawChoices   = $_POST['choices'] ?? [];
-
-        if ($questionId <= 0) {
-            $errors[] = 'Invalid question specified.';
-        }
-        if ($questionText === '') {
-            $errors[] = 'Question text is required.';
-        }
-        if (!in_array($questionType, ['multiple_choice', 'yes_no', 'rating', 'short_answer'], true)) {
-            $questionType = 'multiple_choice';
-        }
-
-        $cleanChoices = [];
-        if ($questionType === 'yes_no') {
-            $cleanChoices = ['Yes', 'No'];
-        } elseif ($questionType === 'rating') {
-            $cleanChoices = ['1 - Poor', '2 - Fair', '3 - Good', '4 - Very Good', '5 - Excellent'];
-        } elseif ($questionType === 'multiple_choice') {
-            foreach ($rawChoices as $c) {
-                $cVal = trim((string)$c);
-                if ($cVal !== '') {
-                    $cleanChoices[] = $cVal;
-                }
-            }
-            if (count($cleanChoices) < 2) {
-                $errors[] = 'Multiple choice questions require at least 2 option choices.';
-            }
-        }
-
-        if (empty($errors)) {
-            try {
-                $pdo->beginTransaction();
-
-                $qUpdate = $pdo->prepare(
-                    "UPDATE survey_questions 
-                     SET question = ?, question_type = ? 
-                     WHERE question_id = ? AND survey_id = ?"
-                );
-                $qUpdate->execute([$questionText, $questionType, $questionId, $surveyId]);
-
-                // Delete old choices and re-insert updated choices
-                $delChoices = $pdo->prepare("DELETE FROM survey_choices WHERE question_id = ?");
-                $delChoices->execute([$questionId]);
-
-                if (!empty($cleanChoices)) {
-                    $cInsert = $pdo->prepare(
-                        "INSERT INTO survey_choices (question_id, choice_text, choice_order)
-                         VALUES (?, ?, ?)"
-                    );
-                    foreach ($cleanChoices as $cIdx => $choiceText) {
-                        $cInsert->execute([$questionId, $choiceText, $cIdx + 1]);
-                    }
-                }
-
-                $pdo->commit();
-
-                set_flash('success', 'Question updated successfully.');
-                redirect("staff/survey_questions.php?id={$surveyId}");
-            } catch (Exception $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                $errors[] = 'Failed to update question: ' . $e->getMessage();
-            }
-        }
-    }
-
-    // --- C. DELETE QUESTION ---
-    elseif ($action === 'delete_question') {
-        if ($isPublished) {
-            $errors[] = 'Questions cannot be deleted anymore once a survey has been published.';
-        }
-        $questionId = (int)($_POST['question_id'] ?? 0);
-
-        if ($questionId > 0 && empty($errors)) {
-            $qDel = $pdo->prepare("DELETE FROM survey_questions WHERE question_id = ? AND survey_id = ?");
-            $qDel->execute([$questionId, $surveyId]);
-
-            set_flash('success', 'Question deleted successfully.');
-            redirect("staff/survey_questions.php?id={$surveyId}");
-        } elseif (empty($errors)) {
-            $errors[] = 'Invalid question identifier for deletion.';
-        }
-    }
-
-    // --- D. EDIT SURVEY SETTINGS ---
-    elseif ($action === 'edit_survey_settings') {
-        $title       = trim($_POST['title'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        $status      = trim($_POST['status'] ?? 'draft');
-        if (!in_array($status, ['draft', 'active', 'inactive', 'closed'], true)) {
-            $status = 'draft';
-        }
-
-        $startDateDay  = trim($_POST['start_date'] ?? '');
-        $startTime     = trim($_POST['start_time'] ?? '00:00');
-        $endDateDay    = trim($_POST['end_date'] ?? '');
-        $endTime       = trim($_POST['end_time'] ?? '23:59');
-
-        if ($startDateDay !== '' && str_contains($startDateDay, 'T')) {
-            $startDate = str_replace('T', ' ', $startDateDay);
-        } else {
-            $startDate = $startDateDay !== '' ? ($startDateDay . ' ' . ($startTime ?: '00:00') . ':00') : '';
-        }
-
-        if ($endDateDay !== '' && str_contains($endDateDay, 'T')) {
-            $endDate = str_replace('T', ' ', $endDateDay);
-        } else {
-            $endDate = $endDateDay !== '' ? ($endDateDay . ' ' . ($endTime ?: '23:59') . ':00') : '';
-        }
-
-        if ($status === 'active' && $startDate !== '' && $startDate > date('Y-m-d H:i:s')) {
-            $startDate = date('Y-m-d H:i:s');
-        }
-
-        if ($title === '') {
-            $errors[] = 'Survey title is required.';
-        }
-        if ($startDate === '' || $endDate === '' || $startDateDay === '' || $endDateDay === '') {
-            $errors[] = 'Opening date & time and closing date & time are required.';
-        } else {
-            $startTimestamp = strtotime($startDate);
-            $endTimestamp   = strtotime($endDate);
-
-            if ($startTimestamp === false || $endTimestamp === false) {
-                $errors[] = 'Invalid date or time format provided.';
-            } elseif ($endTimestamp <= $startTimestamp) {
-                $errors[] = 'Invalid Schedule: The closing date and time must be logically after the starting date and time.';
-            }
-        }
-
-        if (empty($errors)) {
-            $stmt = $pdo->prepare(
-                "UPDATE surveys 
-                 SET title = ?, description = ?, status = ?, start_date = ?, end_date = ?
-                 WHERE survey_id = ?"
-            );
-            $stmt->execute([$title, $description, $status, $startDate, $endDate, $surveyId]);
-
-            set_flash('success', "Survey settings updated successfully.");
-            redirect("staff/survey_questions.php?id={$surveyId}&tab=settings");
-        }
-    }
-
-    // --- E. PUBLISH / DEPLOY SURVEY ---
-    elseif ($action === 'publish_survey') {
-        $qCountStmt = $pdo->prepare("SELECT COUNT(*) FROM survey_questions WHERE survey_id = ?");
-        $qCountStmt->execute([$surveyId]);
-        $qCount = (int)$qCountStmt->fetchColumn();
-
-        if ($qCount === 0) {
-            set_flash('error', 'Cannot publish a survey with no questions. Please add at least one question before publishing.');
-            redirect("staff/survey_questions.php?id={$surveyId}");
-        } elseif (strtotime($survey['end_date']) <= strtotime($survey['start_date'])) {
-            set_flash('error', 'Cannot publish survey: Closing date must be after opening date. Please adjust the schedule in Settings.');
-            redirect("staff/survey_questions.php?id={$surveyId}&tab=settings");
-        } else {
-            $stmt = $pdo->prepare("UPDATE surveys SET status = 'active', start_date = LEAST(start_date, NOW()) WHERE survey_id = ?");
-            $stmt->execute([$surveyId]);
-
-            set_flash('success', "Survey '{$survey['title']}' has been published and is now active for cooperative members to answer!");
-            redirect("staff/survey_questions.php?id={$surveyId}");
-        }
-    }
-
-    // --- F. DELETE SURVEY ---
-    elseif ($action === 'delete_survey') {
-        $delStmt = $pdo->prepare("DELETE FROM surveys WHERE survey_id = ?");
-        $delStmt->execute([$surveyId]);
-
-        set_flash('success', "Survey '{$survey['title']}' was deleted successfully.");
-        redirect('staff/surveys.php');
-    }
-}
-
-// =========================================================
-// 3. FETCH QUESTIONS & CHOICES
-// =========================================================
-$questionsStmt = $pdo->prepare(
-    "SELECT * FROM survey_questions 
-     WHERE survey_id = ? 
-     ORDER BY question_order ASC, question_id ASC"
-);
-$questionsStmt->execute([$surveyId]);
-$questions = $questionsStmt->fetchAll();
-
-$questionIds = array_column($questions, 'question_id');
+$isPublished = false;
+$memberAnswersMap = [];
+$questions = [];
 $choicesByQuestion = [];
 
-if (!empty($questionIds)) {
-    $placeholders = implode(',', array_fill(0, count($questionIds), '?'));
-    $cStmt = $pdo->prepare(
-        "SELECT * FROM survey_choices 
-         WHERE question_id IN ($placeholders) 
-         ORDER BY choice_order ASC, choice_id ASC"
-    );
-    $cStmt->execute($questionIds);
-    $choices = $cStmt->fetchAll();
-
-    foreach ($choices as $c) {
-        $choicesByQuestion[$c['question_id']][] = $c;
-    }
-}
-
-// =========================================================
-// 4. FETCH LIVE ANALYTICS DATA FOR EMBEDDED ANALYTICS TAB
-// =========================================================
-$totalMembers = (int)$pdo->query("SELECT COUNT(*) FROM member")->fetchColumn();
-$respCountStmt = $pdo->prepare("SELECT COUNT(DISTINCT member_id) FROM responses WHERE survey_id = ?");
-$respCountStmt->execute([$surveyId]);
-$totalSurveyRespondents = (int)$respCountStmt->fetchColumn();
-$participationRate = $totalMembers > 0 ? round(($totalSurveyRespondents / $totalMembers) * 100, 1) : 0;
-
-$questionStats = [];
-foreach ($questions as $q) {
-    $qId = (int)$q['question_id'];
-    $qType = $q['question_type'];
-
-    if ($qType === 'short_answer') {
-        $saStmt = $pdo->prepare(
-            "SELECT r.*, m.account_number, m.firstname, m.lastname, m.passport_photo
-             FROM responses r
-             INNER JOIN member m ON m.member_id = r.member_id
-             WHERE r.question_id = ?
-             ORDER BY r.submitted_at DESC"
-        );
-        $saStmt->execute([$qId]);
-        $questionStats[$qId] = [
-            'type' => 'short_answer',
-            'total_responses' => (int)$pdo->query("SELECT COUNT(*) FROM responses WHERE question_id = $qId")->fetchColumn(),
-            'answers' => $saStmt->fetchAll(),
-        ];
-    } else {
-        $cStatsStmt = $pdo->prepare(
-            "SELECT sc.*,
-                    (SELECT COUNT(*) FROM responses r WHERE r.question_id = sc.question_id AND r.choice_id = sc.choice_id) AS vote_count
-             FROM survey_choices sc
-             WHERE sc.question_id = ?
-             ORDER BY sc.choice_order ASC, sc.choice_id ASC"
-        );
-        $cStatsStmt->execute([$qId]);
-        $cList = $cStatsStmt->fetchAll();
-
-        $qTotalVotes = 0;
-        $ratingScoreSum = 0;
-        $ratingVotesCount = 0;
-
-        foreach ($cList as $c) {
-            $votes = (int)$c['vote_count'];
-            $qTotalVotes += $votes;
-            if ($qType === 'rating') {
-                preg_match('/^(\d+)/', $c['choice_text'], $matches);
-                $numericVal = !empty($matches[1]) ? (int)$matches[1] : (int)$c['choice_order'];
-                $ratingScoreSum += ($numericVal * $votes);
-                $ratingVotesCount += $votes;
-            }
-        }
-
-        $choicesWithPct = [];
-        foreach ($cList as $c) {
-            $votes = (int)$c['vote_count'];
-            $pct = $qTotalVotes > 0 ? round(($votes / $qTotalVotes) * 100, 1) : 0.0;
-            $c['percentage'] = $pct;
-            $choicesWithPct[] = $c;
-        }
-
-        $avgRating = ($qType === 'rating' && $ratingVotesCount > 0) 
-            ? round($ratingScoreSum / $ratingVotesCount, 2) 
-            : 0.0;
-
-        $questionStats[$qId] = [
-            'type' => $qType,
-            'total_responses' => $qTotalVotes,
-            'choices' => $choicesWithPct,
-            'avg_rating' => $avgRating,
-        ];
-    }
-}
-
-// 5. Fetch Distinct Member Respondent List & Answers Map for Individual Sub-Tab
-$respondentsStmt = $pdo->prepare(
-    "SELECT m.member_id, m.account_number, m.firstname, m.lastname, m.contact_number, m.address, m.passport_photo,
-            MAX(r.submitted_at) AS submitted_at,
-            COUNT(DISTINCT r.question_id) AS answered_count
-     FROM member m
-     INNER JOIN responses r ON r.member_id = m.member_id
-     WHERE r.survey_id = ?
-     GROUP BY m.member_id
-     ORDER BY submitted_at DESC"
-);
-$respondentsStmt->execute([$surveyId]);
-$respondents = $respondentsStmt->fetchAll();
-
-$allResponsesStmt = $pdo->prepare(
-    "SELECT r.member_id, r.question_id, r.choice_id, r.answer, r.submitted_at,
-            sq.question, sq.question_type, sq.question_order,
-            sc.choice_text
-     FROM responses r
-     INNER JOIN survey_questions sq ON sq.question_id = r.question_id
-     LEFT JOIN survey_choices sc ON sc.choice_id = r.choice_id
-     WHERE r.survey_id = ?
-     ORDER BY sq.question_order ASC"
-);
-$allResponsesStmt->execute([$surveyId]);
-$rawResponses = $allResponsesStmt->fetchAll();
-
-$memberAnswersMap = [];
-foreach ($rawResponses as $row) {
-    $memberAnswersMap[$row['member_id']][] = $row;
-}
-
-$pageTitle = 'Manage Questions · ' . $survey['title'];
 require_once __DIR__ . '/../pages/header_staff.php';
 ?>
-
+<script>
+  window.SURVEY_ID = "<?= htmlspecialchars($surveyId) ?>";
+</script>
 <div id="surveyQuestionsView" class="page-view active">
   
   <style>
@@ -790,31 +366,31 @@ require_once __DIR__ . '/../pages/header_staff.php';
       <div class="d-inline-flex align-items-center gap-2">
         <span class="questions-count-pill" title="Total questions in this survey">
           <i class="fa-solid fa-list-check"></i>
-          <span><?= count($questions) ?> Question<?= count($questions) === 1 ? '' : 's' ?></span>
+          <span><span id="qCountTop">0</span> Questions</span>
         </span>
-        <?php if ($survey['status'] === 'active'): ?>
+        <div id="publishStatusContainer">
           <span class="status-pill status-active published-status-badge">
             <i class="fa-solid fa-circle-check"></i> Published
           </span>
-        <?php else: ?>
-          <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST" id="publishSurveyForm" style="margin: 0; display: inline;">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        </div><div id="publishFormContainer">
+          <form>
+            <input type="hidden" name="csrf_token" value="">
             <input type="hidden" name="action" value="publish_survey">
-            <button type="button" class="btn btn-primary btn-sm" onclick="showSystemConfirm({ title: 'Publish Survey', message: 'Publish and deploy this survey now? It will immediately become available for members to answer.', confirmText: 'Yes, Publish', isDanger: false, icon: 'fa-solid fa-paper-plane', onConfirm: () => document.getElementById('publishSurveyForm').submit() });" style="padding: 0 16px; height: 34px; font-size: 0.84rem; font-weight: 700; border-radius: 8px; background: linear-gradient(135deg, #00c2a8 0%, #3b82f6 100%); border: none; box-shadow: 0 4px 14px rgba(0, 194, 168, 0.35); display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; line-height: 1; box-sizing: border-box;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="publishSurvey()" style="padding: 0 16px; height: 34px; font-size: 0.84rem; font-weight: 700; border-radius: 8px; background: linear-gradient(135deg, #00c2a8 0%, #3b82f6 100%); border: none; box-shadow: 0 4px 14px rgba(0, 194, 168, 0.35); display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; line-height: 1; box-sizing: border-box;">
               <i class="fa-solid fa-paper-plane"></i> Publish
             </button>
           </form>
-        <?php endif; ?>
+        </div>
       </div>
     </div>
 
     <!-- Row 2: Survey Title (Strongest Visual Element) & Description -->
     <div style="margin-bottom: 1.25rem;">
       <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.45rem; line-height: 1.3; letter-spacing: -0.3px;">
-        <?= e($survey['title']) ?>
+        <span id="surveyTitleDisp">Loading...</span>
       </h1>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0; max-width: 820px; line-height: 1.55;">
-        <?= e($survey['description'] ?: 'Define survey questions, response types, and choice options.') ?>
+        <span id="surveyDescDisp">Loading...</span>
       </p>
     </div>
 
@@ -825,7 +401,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     <div class="d-flex justify-content-end align-items-center flex-wrap gap-3">
       <span style="color: var(--text-dim); font-size: 0.82rem; display: inline-flex; align-items: center; gap: 0.35rem;">
         <i class="fa-solid fa-calendar-days" style="color: var(--primary-teal);"></i>
-        <?= date('M d, Y g:i A', strtotime($survey['start_date'])) ?> &mdash; <?= date('M d, Y g:i A', strtotime($survey['end_date'])) ?>
+        <span id="surveyDatesDisp">Loading...</span>
       </span>
     </div>
 
@@ -835,10 +411,10 @@ require_once __DIR__ . '/../pages/header_staff.php';
   <div class="questionnaire-tabnav-wrapper">
     <div class="questionnaire-tab-track">
       <button type="button" class="btn questionnaire-tab-btn active-tab" id="btnTabQuestions" onclick="switchQuestionnaireTab('questions')">
-        <i class="fa-solid fa-list-check"></i> Questions (<?= count($questions) ?>)
+        <i class="fa-solid fa-list-check"></i> Questions (<span id="qCountTop">0</span>)
       </button>
       <button type="button" class="btn questionnaire-tab-btn" id="btnTabResponses" onclick="switchQuestionnaireTab('responses')">
-        <i class="fa-solid fa-chart-column"></i> Responses (<?= number_format($totalSurveyRespondents) ?>)
+        <i class="fa-solid fa-chart-column"></i> Responses (<span id="respCountTab">0</span>)
       </button>
       <button type="button" class="btn questionnaire-tab-btn" id="btnTabSettings" onclick="switchQuestionnaireTab('settings')">
         <i class="fa-solid fa-gear"></i> Settings
@@ -858,759 +434,114 @@ require_once __DIR__ . '/../pages/header_staff.php';
        ========================================================= -->
   <div id="tabQuestionsContent">
     <div class="section-title" style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
-      <?php if (!empty($questions) && !$isPublished): ?>
-        <button type="button" class="btn btn-primary btn-sm" onclick="openAddQuestionModal()" style="padding: 7px 16px; font-size: 0.84rem; font-weight: 700; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.4rem; flex-shrink: 0;">
-          <i class="fa-solid fa-plus"></i> Add Question
-        </button>
-      <?php endif; ?>
+      <div id="addQuestionBtnContainer"></div>
       <div>
-        <h3 style="font-size: 1.1rem; color: var(--text-main); font-weight: 700; margin-bottom: 0.15rem;">Question List (<?= count($questions) ?>)</h3>
+        <h3 style="font-size: 1.1rem; color: var(--text-main); font-weight: 700; margin-bottom: 0.15rem;">Question List (<span class="qCountTab">0</span>)</h3>
         <p class="section-subtitle" style="margin-bottom: 0;">Configured survey items and response options</p>
       </div>
     </div>
-
-    <?php if (empty($questions)): ?>
-      <div class="table-card text-center py-5" style="border: 1px dashed var(--bg-card-border); padding: 3rem 1.5rem; margin-bottom: 2rem;">
-        <i class="fa-solid fa-clipboard-question fs-1 mb-3" style="color: var(--primary-teal); opacity: 0.4;"></i>
-        <h4 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.4rem;">No Questions in This Survey Yet</h4>
-        <p style="color: var(--text-muted); font-size: 0.88rem; max-width: 420px; margin: 0 auto 1.25rem auto; line-height: 1.5;">
-          Build your questionnaire by adding multiple choice, yes/no, rating scale, or open-ended description type questions.
-        </p>
-        <?php if (!$isPublished): ?>
-          <button type="button" class="btn btn-primary btn-sm" onclick="openAddQuestionModal()" style="padding: 8px 20px; font-weight: 700; border-radius: 8px;">
-            <i class="fa-solid fa-plus me-1"></i> Add Question
-          </button>
-        <?php endif; ?>
-      </div>
-    <?php else: ?>
-      <div style="display: flex; flex-direction: column; gap: 1.15rem; margin-bottom: 2.5rem;">
-        <?php foreach ($questions as $index => $q): ?>
-          <?php 
-            $qId = (int)$q['question_id'];
-            $qChoices = $choicesByQuestion[$qId] ?? [];
-            $qNumber = $index + 1;
-
-            $typeBadge = match($q['question_type']) {
-              'multiple_choice' => '<span class="status-pill" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8;"><i class="fa-solid fa-circle-dot" style="font-size:0.7rem;margin-right:4px;"></i> Multiple Choice</span>',
-              'yes_no'          => '<span class="status-pill status-active"><i class="fa-solid fa-thumbs-up" style="font-size:0.7rem;margin-right:4px;"></i> Yes/No</span>',
-              'rating'          => '<span class="status-pill status-default"><i class="fa-solid fa-star" style="font-size:0.7rem;margin-right:4px;"></i> Rating Scale (1-5)</span>',
-              'short_answer'    => '<span class="status-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc;"><i class="fa-solid fa-paragraph" style="font-size:0.7rem;margin-right:4px;"></i> Description Type Answer</span>',
-              default           => '<span class="status-pill">' . e($q['question_type']) . '</span>'
-            };
-          ?>
-          <div class="table-card hover-glow-card" style="margin-top: 0; padding: 1.4rem 1.6rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 0.85rem;">
-              <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
-                <span style="background: rgba(0, 194, 168, 0.15); border: 1px solid rgba(0, 194, 168, 0.35); color: var(--primary-teal); font-weight: 800; border-radius: 6px; padding: 3px 8px; font-size: 0.8rem;">
-                  Q<?= $qNumber ?>
-                </span>
-                <?= $typeBadge ?>
-              </div>
-
-              <?php if (!$isPublished): ?>
-                <div style="display: inline-flex; align-items: center; gap: 0.5rem;">
-                  <button type="button" class="icon-btn btn-edit-dynamic js-edit-question-btn" title="Edit Question" data-question-id="<?= (int)$qId ?>" aria-label="Edit Question">
-                    <i class="fa-solid fa-pen"></i>
-                  </button>
-                  <button type="button" class="icon-btn btn-delete-dynamic js-delete-question-btn" title="Delete Question" data-question-id="<?= (int)$qId ?>" aria-label="Delete Question">
-                    <i class="fa-solid fa-trash"></i>
-                  </button>
-                </div>
-              <?php endif; ?>
-            </div>
-
-            <h4 style="color: var(--text-main); font-size: 1.05rem; font-weight: 700; margin-bottom: 0.85rem; line-height: 1.45;">
-              <?= e($q['question']) ?>
-            </h4>
-
-            <!-- Choices View -->
-            <?php if (!empty($qChoices)): ?>
-              <div class="structured-box" style="margin-top: 0.75rem; padding: 0.95rem 1.15rem;">
-                <div style="font-size: 0.74rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.55rem; letter-spacing: 0.5px;">
-                  Configured Choices (<?= count($qChoices) ?>):
-                </div>
-                <div style="display: flex; flex-wrap: wrap; gap: 0.55rem;">
-                  <?php foreach ($qChoices as $c): ?>
-                    <span style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--bg-card-border); color: var(--text-main); border-radius: 6px; padding: 5px 11px; font-size: 0.82rem; font-weight: 500;">
-                      <?= e($c['choice_text']) ?>
-                    </span>
-                  <?php endforeach; ?>
-                </div>
-              </div>
-            <?php elseif ($q['question_type'] === 'short_answer'): ?>
-              <div style="color: var(--text-dim); font-size: 0.82rem; font-style: italic; margin-top: 0.35rem;">
-                <i class="fa-solid fa-pen-fancy me-1" style="color: var(--primary-teal);"></i> Open-ended text field response.
-              </div>
-            <?php endif; ?>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    <?php endif; ?>
+    <div id="questionsListContainer">
+        <div class="table-card text-center py-5"><i class="fa-solid fa-spinner fa-spin"></i> Loading questions...</div>
+    </div>
   </div>
-
-  <!-- =========================================================
-       TAB 2: RESPONSES & ANALYTICS CONTENT
-       ========================================================= -->
   <div id="tabResponsesContent" style="display: none;">
-    
-    <!-- Responses Header with Prominent Total Count -->
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
       <div>
         <h3 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem; letter-spacing: -0.2px;">
-          <?= number_format($totalSurveyRespondents) ?> Responses
+          <span id="respCountHeader">0</span> Responses
         </h3>
-        <p class="section-subtitle" style="margin-bottom: 0; font-size: 0.88rem;">
-          Aggregated response summaries, question-level analysis, and individual answer sheets
-        </p>
+        <p class="section-subtitle" style="margin-bottom: 0; font-size: 0.88rem;">Aggregated response summaries, question-level analysis, and individual answer sheets</p>
       </div>
-
       <div class="d-inline-flex align-items-center gap-2 flex-wrap">
-        <a href="survey_print_report.php?id=<?= $surveyId ?>" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration: none; padding: 6px 13px; font-size: 0.82rem;">
+        <a id="printReportLink" href="#" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration: none; padding: 6px 13px; font-size: 0.82rem;">
           <i class="fa-solid fa-print me-1"></i> Print Report
         </a>
       </div>
     </div>
 
-    <!-- Secondary Responses Sub-Tabs: [ Summary ] [ Question ] [ Individual ] (Centered) -->
+    <!-- Secondary Responses Sub-Tabs -->
     <div style="display: flex; justify-content: center; margin-bottom: 1.5rem;">
       <div style="display: inline-flex; gap: 0.4rem; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--bg-card-border); padding: 4px; border-radius: 10px; flex-wrap: wrap; justify-content: center;">
-        <button type="button" class="btn btn-sm responses-subtab-btn active-subtab" id="btnSubtabSummary" onclick="switchResponsesSubtab('summary')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem; cursor: pointer; transition: all 0.2s ease;">
+        <button type="button" class="btn btn-sm responses-subtab-btn active-subtab" onclick="switchResponsesSubtab('summary')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem;">
           <i class="fa-solid fa-chart-pie me-1"></i> Summary
         </button>
-        <button type="button" class="btn btn-sm responses-subtab-btn" id="btnSubtabQuestion" onclick="switchResponsesSubtab('question')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem; cursor: pointer; transition: all 0.2s ease;">
+        <button type="button" class="btn btn-sm responses-subtab-btn" onclick="switchResponsesSubtab('question')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem;">
           <i class="fa-solid fa-list-ol me-1"></i> Question
         </button>
-        <button type="button" class="btn btn-sm responses-subtab-btn" id="btnSubtabIndividual" onclick="switchResponsesSubtab('individual')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem; cursor: pointer; transition: all 0.2s ease;">
-          <i class="fa-solid fa-user-check me-1"></i> Individual (<?= count($respondents) ?>)
+        <button type="button" class="btn btn-sm responses-subtab-btn" onclick="switchResponsesSubtab('individual')" style="border-radius: 7px; padding: 6px 16px; font-size: 0.84rem;">
+          <i class="fa-solid fa-user-check me-1"></i> Individual (<span id="individualCount">0</span>)
         </button>
       </div>
     </div>
 
-    <!-- ---------------------------------------------------------
-         SUB-TAB 1: SUMMARY
-         --------------------------------------------------------- -->
     <div id="subtabSummaryContent">
-      <!-- Summary Metrics Grid -->
-      <div class="metrics-grid" style="margin-bottom: 1.5rem;">
-        <div class="metric-card hover-glow-card">
-          <div class="metric-icon purple">
-            <i class="fa-solid fa-users"></i>
-          </div>
-          <div class="metric-data">
-            <span class="metric-label">Total Respondents</span>
-            <h3 class="metric-value"><?= number_format($totalSurveyRespondents) ?></h3>
-            <span class="metric-subtext"><i class="fa-solid fa-check"></i> Completed submissions</span>
-          </div>
+        <div class="metrics-grid" style="margin-bottom: 1.5rem;">
+            <div class="metric-card hover-glow-card"><div class="metric-icon purple"><i class="fa-solid fa-users"></i></div><div class="metric-data"><span class="metric-label">Total Respondents</span><h3 class="metric-value" id="statTotalResp">0</h3><span class="metric-subtext"><i class="fa-solid fa-check"></i> Completed submissions</span></div></div>
+            <div class="metric-card hover-glow-card"><div class="metric-icon cyan"><i class="fa-solid fa-chart-pie"></i></div><div class="metric-data"><span class="metric-label">Participation Rate</span><h3 class="metric-value" id="statPartRate">0%</h3><span class="metric-subtext positive"><i class="fa-solid fa-users-line"></i> Of <span id="statTotalMem">0</span> active members</span></div></div>
+            <div class="metric-card hover-glow-card"><div class="metric-icon emerald"><i class="fa-solid fa-list-check"></i></div><div class="metric-data"><span class="metric-label">Total Questions</span><h3 class="metric-value qCountTab">0</h3><span class="metric-subtext"><i class="fa-solid fa-database"></i> Live calculated items</span></div></div>
         </div>
-
-        <div class="metric-card hover-glow-card">
-          <div class="metric-icon cyan">
-            <i class="fa-solid fa-chart-pie"></i>
-          </div>
-          <div class="metric-data">
-            <span class="metric-label">Participation Rate</span>
-            <h3 class="metric-value"><?= $participationRate ?>%</h3>
-            <span class="metric-subtext positive"><i class="fa-solid fa-users-line"></i> Of <?= number_format($totalMembers) ?> active members</span>
-          </div>
-        </div>
-
-        <div class="metric-card hover-glow-card">
-          <div class="metric-icon emerald">
-            <i class="fa-solid fa-list-check"></i>
-          </div>
-          <div class="metric-data">
-            <span class="metric-label">Total Questions</span>
-            <h3 class="metric-value"><?= count($questions) ?></h3>
-            <span class="metric-subtext"><i class="fa-solid fa-database"></i> Live calculated items</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Quick Summary Overview Table with Search & Filter -->
-      <div class="table-card" style="margin-top: 0; padding: 1.4rem 1.6rem; margin-bottom: 2rem; overflow: visible; position: relative; z-index: 50;">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-          <h4 style="color: var(--text-main); font-size: 1.05rem; font-weight: 700; margin: 0;">
-            <i class="fa-solid fa-chart-simple" style="color: var(--primary-teal); margin-right: 6px;"></i> Response Summary
-          </h4>
-        </div>
-
-        <!-- Search Bar and Filter Popover Controls -->
-        <div class="side-by-side-controls mb-3" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-          <div class="search-bar-container view-search" style="flex: 1; max-width: 480px; position: relative;">
-            <i class="fa-solid fa-magnifying-glass search-icon" style="position: absolute; left: 1.1rem; top: 50%; transform: translateY(-50%); color: var(--text-dim); pointer-events: none;"></i>
-            <input type="text" class="search-input" id="summaryQuestionSearch" placeholder="Search questions in summary..." onkeyup="filterSummaryQuestions()" style="width: 100%; padding-left: 2.8rem; padding-right: 1rem; height: 38px; border-radius: 8px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); font-size: 0.86rem; outline: none;">
-          </div>
-
-          <div class="unified-filter-wrapper" style="position: relative; z-index: 1050;">
-            <button type="button" class="btn btn-secondary filter-btn-trigger btn-sm" id="summaryFilterBtn" onclick="toggleFilterMenu('summaryFilterPopover', event)" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.45rem;">
-              <i class="fa-solid fa-filter"></i> <span>Filter</span> <i class="fa-solid fa-chevron-down" style="font-size: 0.7rem; opacity: 0.7;"></i>
-            </button>
-
-            <div id="summaryFilterPopover" class="unified-filter-card hidden" onclick="event.stopPropagation();" style="position: absolute; top: calc(100% + 8px); right: 0; width: 320px; z-index: 100000;">
-              <div class="filter-popover-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--bg-card-border);">
-                <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-main);"><i class="fa-solid fa-sliders text-cyan me-1"></i> Filter Summary</h4>
-                <button type="button" class="close-popover-btn" onclick="toggleFilterMenu('summaryFilterPopover', event)" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; line-height: 1;">&times;</button>
-              </div>
-
-              <div class="filter-popover-group" style="margin-bottom: 1rem;">
-                <label class="filter-label" style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.45rem;">Question Type:</label>
-                <select id="summaryTypeFilter" class="table-filter-select-lg" style="width: 100%; height: 42px; min-height: 42px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); padding: 0.45rem 0.85rem; font-size: 0.88rem; line-height: 1.4; box-sizing: border-box;">
-                  <option value="all">All Question Types</option>
-                  <option value="multiple_choice">Multiple Choice</option>
-                  <option value="yes_no">Yes/No</option>
-                  <option value="rating">Rating Scale</option>
-                  <option value="short_answer">Description Type Answer</option>
-                </select>
-              </div>
-
-              <div class="filter-popover-group" style="margin-bottom: 1rem;">
-                <label class="filter-label" style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.45rem;">Response Status:</label>
-                <select id="summaryStatusFilter" class="table-filter-select-lg" style="width: 100%; height: 42px; min-height: 42px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); padding: 0.45rem 0.85rem; font-size: 0.88rem; line-height: 1.4; box-sizing: border-box;">
-                  <option value="all">All Questions</option>
-                  <option value="has_responses">With Responses (&gt; 0)</option>
-                  <option value="zero_responses">Zero Responses (0)</option>
-                </select>
-              </div>
-
-              <div class="filter-popover-footer" style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--bg-card-border); margin-top: 0.75rem;">
-                <button type="button" class="btn btn-primary btn-sm" onclick="applySummaryQuestionsFilter(event)" style="padding: 6px 16px; font-size: 0.84rem; font-weight: 700; border-radius: 8px;">
-                  <i class="fa-solid fa-check me-1"></i> Apply Filters
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-responsive">
-          <table class="dashboard-table" id="summaryQuestionsTable">
-            <thead>
-              <tr>
-                <th style="width: 60px; text-align: center;">#</th>
-                <th style="min-width: 200px; text-align: center;">Question</th>
-                <th style="min-width: 150px; text-align: center;">Type</th>
-                <th style="width: 130px; text-align: center;">Total Responses</th>
-                <th style="min-width: 320px; text-align: center;">Insights</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php if (empty($questions)): ?>
-                <tr><td colspan="5" class="text-center py-4 text-muted">No questions configured in this survey.</td></tr>
-              <?php else: ?>
-                <?php foreach ($questions as $idx => $q): ?>
-                  <?php
-                    $qId = (int)$q['question_id'];
-                    $qType = $q['question_type'];
-                    $stats = $questionStats[$qId] ?? null;
-                    $qTotal = (int)($stats['total_responses'] ?? 0);
-
-                    $typeDisplay = match($qType) {
-                      'multiple_choice' => 'Multiple Choice',
-                      'yes_no'          => 'Yes/No',
-                      'rating'          => 'Rating Scale',
-                      'short_answer'    => 'Description Type Answer',
-                      default           => ucwords(str_replace('_', ' ', $qType))
-                    };
-
-                    $typePillStyle = match($qType) {
-                      'multiple_choice' => 'background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8;',
-                      'yes_no'          => 'background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399;',
-                      'rating'          => 'background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24;',
-                      'short_answer'    => 'background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc;',
-                      default           => ''
-                    };
-                  ?>
-                  <tr class="summary-question-row" data-qtype="<?= e($qType) ?>" data-responses="<?= (int)$qTotal ?>" data-qtext="<?= e(strtolower($q['question'])) ?>">
-                    <td style="font-weight: 700; color: var(--primary-teal); vertical-align: top; padding-top: 1rem; text-align: center;">Q<?= $idx + 1 ?></td>
-                    <td style="font-weight: 600; color: var(--text-main); vertical-align: top; padding-top: 1rem; line-height: 1.45;"><?= e($q['question']) ?></td>
-                    <td style="vertical-align: top; padding-top: 1rem; text-align: center;">
-                      <span class="status-pill" style="<?= $typePillStyle ?>"><?= e($typeDisplay) ?></span>
-                    </td>
-                    <td class="text-center" style="font-weight: 700; color: var(--text-main); vertical-align: top; padding-top: 1rem; font-size: 0.95rem;">
-                      <?= number_format($qTotal) ?>
-                    </td>
-                    <td style="vertical-align: top; padding-top: 0.85rem; padding-bottom: 0.85rem;">
-                      <?php if ($qType === 'short_answer'): ?>
-                        <!-- Description Type Answer Insight: Answered count out of total survey respondents -->
-                        <div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.5rem 0.75rem; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px;">
-                          <i class="fa-solid fa-pen-nib" style="color: #c084fc; font-size: 0.9rem; margin-top: 2px;"></i>
-                          <div>
-                            <div style="font-size: 0.84rem; font-weight: 700; color: var(--text-main);">
-                              <?= number_format($qTotal) ?> of <?= number_format($totalSurveyRespondents) ?> survey respondents answered
-                            </div>
-                            <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
-                              <?= $totalSurveyRespondents > 0 ? round(($qTotal / $totalSurveyRespondents) * 100, 1) . '% completion rate among all respondents' : 'No survey responses recorded yet' ?>
-                            </div>
-                          </div>
-                        </div>
-
-                      <?php else: ?>
-                        <!-- Choice-based Insight: Frequently selected answer & segregated 100% scale breakdown -->
-                        <?php
-                          $choices = $stats['choices'] ?? [];
-                          $maxVotes = 0;
-                          foreach ($choices as $c) {
-                            $v = (int)($c['vote_count'] ?? 0);
-                            if ($v > $maxVotes) {
-                              $maxVotes = $v;
-                            }
-                          }
-                        ?>
-                        <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-                          
-                          <?php if ($qType === 'rating' && !empty($stats['avg_rating'])): ?>
-                            <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; display: inline-flex; align-items: center; gap: 0.35rem;">
-                              <i class="fa-solid fa-star"></i> Weighted Average: <?= $stats['avg_rating'] ?> / 5.0
-                            </div>
-                          <?php endif; ?>
-
-                          <?php if ($qTotal > 0 && $maxVotes > 0): ?>
-                            <?php
-                              $topChoices = [];
-                              foreach ($choices as $c) {
-                                if ((int)($c['vote_count'] ?? 0) === $maxVotes) {
-                                  $topChoices[] = '<strong>' . e($c['choice_text']) . '</strong> (' . number_format($c['percentage'], 1) . '%, ' . number_format($c['vote_count']) . ' ' . ((int)$c['vote_count'] === 1 ? 'response' : 'responses') . ')';
-                                }
-                              }
-                            ?>
-                            <div style="font-size: 0.78rem; color: var(--primary-teal); font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; margin-bottom: 0.15rem; flex-wrap: wrap;">
-                              <i class="fa-solid fa-fire text-cyan"></i> <span>Frequently Selected: <?= implode(' &bull; ', $topChoices) ?></span>
-                            </div>
-                          <?php endif; ?>
-
-                          <!-- Segregated 100% scale list for choices -->
-                          <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-                            <?php foreach ($choices as $c): ?>
-                              <?php
-                                $cVotes = (int)($c['vote_count'] ?? 0);
-                                $cPct = (float)($c['percentage'] ?? 0.0);
-                                $isTop = ($qTotal > 0 && $maxVotes > 0 && $cVotes === $maxVotes);
-                              ?>
-                              <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; font-size: 0.78rem; background: <?= $isTop ? 'rgba(0, 194, 168, 0.1)' : 'rgba(255, 255, 255, 0.03)' ?>; border: 1px solid <?= $isTop ? 'rgba(0, 194, 168, 0.35)' : 'var(--bg-card-border)' ?>; border-radius: 6px; padding: 4px 8px;">
-                                <div style="display: flex; align-items: center; gap: 0.4rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?= e($c['choice_text']) ?>">
-                                  <?php if ($isTop): ?>
-                                    <i class="fa-solid fa-circle-check" style="color: var(--primary-teal); font-size: 0.7rem; flex-shrink: 0;"></i>
-                                  <?php else: ?>
-                                    <i class="fa-regular fa-circle" style="color: var(--text-dim); font-size: 0.65rem; flex-shrink: 0;"></i>
-                                  <?php endif; ?>
-                                  <span style="color: var(--text-main); font-weight: <?= $isTop ? '700' : '500' ?>; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                    <?= e($c['choice_text']) ?>
-                                  </span>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; font-variant-numeric: tabular-nums;">
-                                  <span style="font-weight: <?= $isTop ? '800' : '600' ?>; color: <?= $isTop ? 'var(--primary-teal)' : 'var(--text-main)' ?>;">
-                                    <?= number_format($cVotes) ?> <?= $cVotes === 1 ? 'vote' : 'votes' ?>
-                                  </span>
-                                  <span style="background: rgba(255, 255, 255, 0.06); padding: 1px 6px; border-radius: 4px; font-size: 0.72rem; color: var(--text-muted); font-weight: 700; min-width: 48px; text-align: right;">
-                                    <?= number_format($cPct, 1) ?>%
-                                  </span>
-                                </div>
-                              </div>
-                            <?php endforeach; ?>
-                          </div>
-
-                        </div>
-                      <?php endif; ?>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-                <tr id="summaryNoMatchesRow" style="display: none;">
-                  <td colspan="5" class="text-center py-4 text-muted">
-                    <i class="fa-solid fa-magnifying-glass me-1 opacity-50"></i> No questions match your search or filter criteria.
-                  </td>
-                </tr>
-              <?php endif; ?>
-            </tbody>
-          </table>
-        </div>
-      </div>
+        <div id="summaryTableContainer"></div>
     </div>
 
-    <!-- ---------------------------------------------------------
-         SUB-TAB 2: QUESTION BREAKDOWN
-         --------------------------------------------------------- -->
     <div id="subtabQuestionContent" style="display: none;">
-      <?php if (empty($questions)): ?>
-        <div class="table-card text-center py-5">
-          <p style="color: var(--text-muted); margin: 0;">This survey does not have any questions configured yet.</p>
-        </div>
-      <?php else: ?>
-        <!-- Search Bar and Filter Popover for Question Breakdown -->
-        <div class="side-by-side-controls mb-3" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-          <div class="search-bar-container view-search" style="flex: 1; max-width: 480px; position: relative;">
-            <i class="fa-solid fa-magnifying-glass search-icon" style="position: absolute; left: 1.1rem; top: 50%; transform: translateY(-50%); color: var(--text-dim); pointer-events: none;"></i>
-            <input type="text" class="search-input" id="breakdownQuestionSearch" placeholder="Search questions or choices in breakdown..." onkeyup="filterBreakdownQuestions()" style="width: 100%; padding-left: 2.8rem; padding-right: 1rem; height: 38px; border-radius: 8px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); font-size: 0.86rem; outline: none;">
-          </div>
-
-          <div class="unified-filter-wrapper" style="position: relative; z-index: 1050;">
-            <button type="button" class="btn btn-secondary filter-btn-trigger btn-sm" id="breakdownFilterBtn" onclick="toggleFilterMenu('breakdownFilterPopover', event)" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.45rem;">
-              <i class="fa-solid fa-filter"></i> <span>Filter</span> <i class="fa-solid fa-chevron-down" style="font-size: 0.7rem; opacity: 0.7;"></i>
-            </button>
-
-            <div id="breakdownFilterPopover" class="unified-filter-card hidden" onclick="event.stopPropagation();" style="position: absolute; top: calc(100% + 8px); right: 0; width: 320px; z-index: 100000;">
-              <div class="filter-popover-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--bg-card-border);">
-                <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-main);"><i class="fa-solid fa-sliders text-cyan me-1"></i> Filter Question Breakdown</h4>
-                <button type="button" class="close-popover-btn" onclick="toggleFilterMenu('breakdownFilterPopover', event)" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; line-height: 1;">&times;</button>
-              </div>
-
-              <div class="filter-popover-group" style="margin-bottom: 1rem;">
-                <label class="filter-label" style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.45rem;">Question Type:</label>
-                <select id="breakdownTypeFilter" class="table-filter-select-lg" style="width: 100%; height: 42px; min-height: 42px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); padding: 0.45rem 0.85rem; font-size: 0.88rem; line-height: 1.4; box-sizing: border-box;">
-                  <option value="all">All Question Types</option>
-                  <option value="multiple_choice">Multiple Choice</option>
-                  <option value="yes_no">Yes/No</option>
-                  <option value="rating">Rating Scale</option>
-                  <option value="short_answer">Description Type Answer</option>
-                </select>
-              </div>
-
-              <div class="filter-popover-footer" style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--bg-card-border); margin-top: 0.75rem;">
-                <button type="button" class="btn btn-primary btn-sm" onclick="applyBreakdownQuestionsFilter(event)" style="padding: 6px 16px; font-size: 0.84rem; font-weight: 700; border-radius: 8px;">
-                  <i class="fa-solid fa-check me-1"></i> Apply Filters
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="breakdownCardsContainer" style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2.5rem;">
-          <?php foreach ($questions as $index => $q): ?>
-            <?php
-              $qId = (int)$q['question_id'];
-              $stats = $questionStats[$qId] ?? null;
-              $qNumber = $index + 1;
-              $qType = $q['question_type'];
-              $choiceTexts = [];
-              if (!empty($stats['choices'])) {
-                foreach ($stats['choices'] as $sc) {
-                  $choiceTexts[] = $sc['choice_text'];
-                }
-              }
-              $qSearchHaystack = strtolower($q['question'] . ' ' . implode(' ', $choiceTexts));
-
-              $breakdownTypeDisplay = match($qType) {
-                'multiple_choice' => 'Multiple Choice',
-                'yes_no'          => 'Yes/No',
-                'rating'          => 'Rating Scale',
-                'short_answer'    => 'Description Type Answer',
-                default           => ucwords(str_replace('_', ' ', $qType))
-              };
-            ?>
-            <div class="table-card hover-glow-card breakdown-question-card" data-qtype="<?= e($qType) ?>" data-qtext="<?= e($qSearchHaystack) ?>" style="margin-top: 0; padding: 1.4rem 1.6rem;">
-              
-              <!-- Question Title & Header -->
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 0.85rem;">
-                <div style="display: flex; align-items: center; gap: 0.65rem;">
-                  <span style="background: rgba(0, 194, 168, 0.15); border: 1px solid rgba(0, 194, 168, 0.35); color: var(--primary-teal); font-weight: 800; border-radius: 6px; padding: 4px 10px; font-size: 0.82rem;">
-                    Q<?= $qNumber ?>
-                  </span>
-                  <h4 style="color: var(--text-main); font-size: 1.08rem; font-weight: 700; margin: 0;">
-                    <?= e($q['question']) ?>
-                  </h4>
-                </div>
-
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                  <span class="status-pill">
-                    <?= e($breakdownTypeDisplay) ?>
-                  </span>
-                  <?php if ($qType === 'rating' && !empty($stats['avg_rating'])): ?>
-                    <span class="status-pill status-default">
-                      <i class="fa-solid fa-star me-1"></i> Avg: <?= $stats['avg_rating'] ?> / 5.0
-                    </span>
-                  <?php endif; ?>
-                </div>
-              </div>
-
-              <!-- CHOICE-BASED RESULTS -->
-              <?php if ($qType !== 'short_answer'): ?>
-                <?php
-                  $choices = $stats['choices'] ?? [];
-                  $qTotalVotes = $stats['total_responses'] ?? 0;
-                ?>
-                <div style="display: flex; flex-direction: column; gap: 0.85rem; padding-top: 0.35rem;">
-                  <?php foreach ($choices as $c): ?>
-                    <?php
-                      $votes = (int)$c['vote_count'];
-                      $pct = $c['percentage'];
-                    ?>
-                    <div>
-                      <div style="display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 600; margin-bottom: 0.35rem;">
-                        <span style="color: var(--text-main);"><?= e($c['choice_text']) ?></span>
-                        <span style="color: var(--primary-teal); font-weight: 700;"><?= $votes ?> vote<?= $votes === 1 ? '' : 's' ?> (<?= $pct ?>%)</span>
-                      </div>
-                      <div style="height: 10px; background: rgba(255, 255, 255, 0.06); border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden;">
-                        <div style="width: <?= $pct ?>%; height: 100%; background: linear-gradient(90deg, #00c2a8 0%, #8b5cf6 100%); border-radius: 6px; transition: width 0.4s ease;"></div>
-                      </div>
-                    </div>
-                  <?php endforeach; ?>
-
-                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--text-muted); padding-top: 0.75rem; border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 0.5rem;">
-                    <span><i class="fa-solid fa-chart-simple" style="color: var(--primary-teal); margin-right: 4px;"></i> Total Question Responses: <strong style="color: var(--text-main);"><?= $qTotalVotes ?></strong></span>
-                    <?php if ($qType === 'yes_no' && count($choices) === 2): ?>
-                      <span style="color: var(--primary-teal); font-weight: 600;">
-                        <i class="fa-solid fa-scale-balanced me-1"></i> <?= $choices[0]['choice_text'] ?> (<?= $choices[0]['percentage'] ?>%) vs <?= $choices[1]['choice_text'] ?> (<?= $choices[1]['percentage'] ?>%)
-                      </span>
-                    <?php endif; ?>
-                  </div>
-                </div>
-
-              <!-- OPEN-ENDED SHORT ANSWER RESULTS -->
-              <?php else: ?>
-                <?php
-                  $answers = $stats['answers'] ?? [];
-                  $totalAnswers = $stats['total_responses'] ?? 0;
-                ?>
-                <div style="padding-top: 0.35rem;">
-                  <div style="font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.65rem; letter-spacing: 0.5px;">
-                    Submitted Member Responses (<?= $totalAnswers ?>):
-                  </div>
-
-                  <?php if (empty($answers)): ?>
-                    <div class="structured-box text-center py-4" style="color: var(--text-muted);">
-                      No text responses submitted yet for this question.
-                    </div>
-                  <?php else: ?>
-                    <div style="display: flex; flex-direction: column; gap: 0.65rem; max-height: 320px; overflow-y: auto;">
-                      <?php foreach ($answers as $a): ?>
-                        <div class="structured-box" style="padding: 0.85rem 1rem;">
-                          <p style="color: var(--text-main); font-size: 0.92rem; line-height: 1.5; margin-bottom: 0.5rem;">
-                            <?= nl2br(e($a['answer'])) ?>
-                          </p>
-                          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; color: var(--text-muted);">
-                            <span><i class="fa-solid fa-user" style="color: var(--primary-teal); margin-right: 4px;"></i> <?= e($a['firstname'] . ' ' . $a['lastname']) ?> (<strong style="color: var(--text-main);"><?= e($a['account_number']) ?></strong>)</span>
-                            <span><i class="fa-solid fa-clock" style="color: var(--primary-teal); margin-right: 4px;"></i> <?= date('M d, Y · h:i A', strtotime($a['submitted_at'])) ?></span>
-                          </div>
-                        </div>
-                      <?php endforeach; ?>
-                    </div>
-                  <?php endif; ?>
-                </div>
-              <?php endif; ?>
-
-            </div>
-          <?php endforeach; ?>
-
-          <div id="breakdownNoMatchesCard" class="table-card text-center py-5" style="display: none;">
-            <i class="fa-solid fa-magnifying-glass fs-2 mb-2 d-block opacity-40"></i>
-            <p style="color: var(--text-muted); margin: 0;">No question breakdown items match your search or filter criteria.</p>
-          </div>
-        </div>
-      <?php endif; ?>
+        <div id="questionBreakdownContainer"></div>
     </div>
 
-    <!-- ---------------------------------------------------------
-         SUB-TAB 3: INDIVIDUAL RESPONSES
-         --------------------------------------------------------- -->
     <div id="subtabIndividualContent" style="display: none;">
-      <div class="table-card" style="margin-top: 0; padding: 1.4rem 1.6rem; margin-bottom: 2rem; overflow: visible; position: relative; z-index: 50;">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <div>
-            <h4 style="color: var(--text-main); font-size: 1.05rem; font-weight: 700; margin-bottom: 0.2rem;">
-              <i class="fa-solid fa-users" style="color: var(--primary-teal); margin-right: 6px;"></i> Individual Member Submissions
-            </h4>
-            <p class="section-subtitle" style="margin-bottom: 0; font-size: 0.84rem;">Review specific answers submitted by each cooperative member</p>
-          </div>
-        </div>
-
-        <?php if (empty($respondents)): ?>
-          <div class="structured-box text-center py-5" style="color: var(--text-muted);">
-            <i class="fa-solid fa-inbox fs-2 mb-2 d-block" style="opacity: 0.4;"></i>
-            No individual response sheets submitted yet for this survey.
-          </div>
-        <?php else: ?>
-          <!-- Search Bar and Filter Popover for Individual Submissions -->
-          <div class="side-by-side-controls mb-3" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-            <div class="search-bar-container view-search" style="flex: 1; max-width: 480px; position: relative;">
-              <i class="fa-solid fa-magnifying-glass search-icon" style="position: absolute; left: 1.1rem; top: 50%; transform: translateY(-50%); color: var(--text-dim); pointer-events: none;"></i>
-              <input type="text" class="search-input" id="individualSearchInput" placeholder="Search respondents by name or account number..." onkeyup="filterIndividualRespondents()" style="width: 100%; padding-left: 2.8rem; padding-right: 1rem; height: 38px; border-radius: 8px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); font-size: 0.86rem; outline: none;">
-            </div>
-
-            <div class="unified-filter-wrapper" style="position: relative; z-index: 1050;">
-              <button type="button" class="btn btn-secondary filter-btn-trigger btn-sm" id="individualFilterBtn" onclick="toggleFilterMenu('individualFilterPopover', event)" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.45rem;">
-                <i class="fa-solid fa-filter"></i> <span>Filter</span> <i class="fa-solid fa-chevron-down" style="font-size: 0.7rem; opacity: 0.7;"></i>
-              </button>
-
-              <div id="individualFilterPopover" class="unified-filter-card hidden" onclick="event.stopPropagation();" style="position: absolute; top: calc(100% + 8px); right: 0; width: 320px; z-index: 100000;">
-                <div class="filter-popover-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--bg-card-border);">
-                  <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-main);"><i class="fa-solid fa-sliders text-cyan me-1"></i> Filter Respondents</h4>
-                  <button type="button" class="close-popover-btn" onclick="toggleFilterMenu('individualFilterPopover', event)" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; line-height: 1;">&times;</button>
-                </div>
-
-                <div class="filter-popover-group" style="margin-bottom: 1rem;">
-                  <label class="filter-label" style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.45rem;">Completion Status:</label>
-                  <select id="individualCompletionFilter" class="table-filter-select-lg" style="width: 100%; height: 42px; min-height: 42px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main); padding: 0.45rem 0.85rem; font-size: 0.88rem; line-height: 1.4; box-sizing: border-box;">
-                    <option value="all">All Submissions</option>
-                    <option value="complete">Fully Completed (<?= count($questions) ?>/<?= count($questions) ?>)</option>
-                    <option value="partial">Partially Answered (&lt; <?= count($questions) ?>)</option>
-                  </select>
-                </div>
-
-                <div class="filter-popover-footer" style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--bg-card-border); margin-top: 0.75rem;">
-                  <button type="button" class="btn btn-primary btn-sm" onclick="applyIndividualRespondentsFilter(event)" style="padding: 6px 16px; font-size: 0.84rem; font-weight: 700; border-radius: 8px;">
-                    <i class="fa-solid fa-check me-1"></i> Apply Filters
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="table-responsive">
-            <table class="dashboard-table" id="individualRespondentsTable">
-              <thead>
-                <tr>
-                  <th>Respondent Name</th>
-                  <th>Account No.</th>
-                  <th>Submission Date</th>
-                  <th class="text-center">Questions Answered</th>
-                  <th class="text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach ($respondents as $r): ?>
-                  <?php
-                    $mId = (int)$r['member_id'];
-                    $fullName = $r['firstname'] . ' ' . $r['lastname'];
-                    $accNo = $r['account_number'];
-                    $answeredCount = (int)$r['answered_count'];
-                    $isComplete = ($answeredCount >= count($questions));
-                    $searchData = strtolower($fullName . ' ' . $accNo . ' ' . date('M d, Y', strtotime($r['submitted_at'])));
-                  ?>
-                  <tr class="individual-respondent-row" data-search="<?= e($searchData) ?>" data-completion="<?= $isComplete ? 'complete' : 'partial' ?>">
-                    <td>
-                      <div style="display: flex; align-items: center; gap: 0.65rem;">
-                        <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #00c2a8, #8b5cf6); display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 700; font-size: 0.78rem;">
-                          <?= strtoupper(substr($r['firstname'], 0, 1) . substr($r['lastname'], 0, 1)) ?>
-                        </div>
-                        <span style="font-weight: 600; color: var(--text-main);"><?= e($fullName) ?></span>
-                      </div>
-                    </td>
-                    <td style="font-family: monospace; color: var(--primary-teal); font-weight: 600;"><?= e($accNo) ?></td>
-                    <td style="color: var(--text-muted); font-size: 0.85rem;"><?= date('M d, Y · h:i A', strtotime($r['submitted_at'])) ?></td>
-                    <td class="text-center">
-                      <span class="status-pill status-active"><?= $answeredCount ?> / <?= count($questions) ?></span>
-                    </td>
-                    <td class="text-center">
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="viewMemberResponses(<?= $mId ?>, '<?= e(addslashes($fullName)) ?>', '<?= e(addslashes($accNo)) ?>')" style="padding: 5px 12px; font-size: 0.8rem;">
-                        <i class="fa-solid fa-eye me-1"></i> View Answers
-                      </button>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-                <tr id="individualNoMatchesRow" style="display: none;">
-                  <td colspan="5" class="text-center py-4 text-muted">
-                    <i class="fa-solid fa-magnifying-glass me-1 opacity-50"></i> No member submissions match your search or filter criteria.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        <?php endif; ?>
-      </div>
+        <div id="individualContainer"></div>
     </div>
   </div>
-
-  <!-- =========================================================
-       TAB 3: SETTINGS CONTENT
-       ========================================================= -->
   <div id="tabSettingsContent" style="display: none;">
-    
-    <!-- Edit Survey Details Card (Matches Header Width) -->
-    <div class="table-card" style="margin-top: 0; padding: 1.6rem 1.8rem; margin-bottom: 2rem;">
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.9rem; margin-bottom: 1.4rem;">
-        <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-          <i class="fa-solid fa-pen-to-square" style="color: var(--primary-teal);"></i> Edit Survey Details
-        </h3>
-        <span class="status-pill status-<?= ($survey['status'] === 'active' ? 'active' : ($survey['status'] === 'draft' ? 'default' : 'locked')) ?>">
-          <?= e(ucfirst($survey['status'])) ?>
-        </span>
-      </div>
-
-      <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST" id="editSurveySettingsForm">
-        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <input type="hidden" name="action" value="edit_survey_settings">
-
-        <div class="form-grid" style="gap: 1.25rem 1.5rem;">
-          <!-- ROW 1: Survey Title & Survey Status -->
-          <div class="form-group">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Survey Title <span style="color: #f87171;">*</span>
-            </label>
-            <input type="text" name="title" value="<?= e($survey['title']) ?>" placeholder="Enter survey title..." required style="height: 44px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+    <div class="table-card" style="margin-top: 0; padding: 1.85rem 2rem; max-width: 800px; margin-bottom: 2rem;">
+      <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 1.25rem;"><i class="fa-solid fa-sliders text-cyan me-2"></i> Survey Settings</h3>
+      <form id="editSettingsForm">
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label>Survey Title <span style="color: #f87171;">*</span></label>
+            <input type="text" name="title" id="setSurveyTitle" required>
           </div>
-
-          <div class="form-group">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Survey Status <span style="color: #f87171;">*</span>
-            </label>
-            <select name="status" id="settingsSurveyStatus" required style="height: 44px; width: 100%; box-sizing: border-box; font-weight: 500; border-radius: 10px; padding: 0.6rem 0.95rem; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
-              <option value="active" <?= $survey['status'] === 'active' ? 'selected' : '' ?>>Active</option>
-              <option value="inactive" <?= in_array($survey['status'], ['inactive', 'closed']) ? 'selected' : '' ?>>Inactive / Closed</option>
-              <option value="draft" <?= $survey['status'] === 'draft' ? 'selected' : '' ?>>Draft</option>
+          <div class="form-group full-width">
+            <label>Survey Status <span style="color: #f87171;">*</span></label>
+            <select name="status" id="setSurveyStatus" required style="height: 44px; width: 100%; border-radius: 10px; padding: 0.6rem 0.95rem; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+              <option value="active">Active (Published)</option>
+              <option value="inactive">Inactive / Closed</option>
+              <option value="draft">Draft (Unpublished)</option>
             </select>
           </div>
-
-          <!-- ROW 2: Description / Instructions -->
-          <div class="form-group" style="grid-column: 1 / -1;">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Description / Instructions
-            </label>
-            <textarea name="description" rows="2" placeholder="Brief survey scope or instructions for respondents..." style="resize: vertical; min-height: 44px; line-height: 1.4; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);"><?= e($survey['description']) ?></textarea>
+          <div class="form-group full-width">
+            <label>Description / Instructions</label>
+            <textarea name="description" id="setSurveyDesc" rows="3"></textarea>
           </div>
-
-          <!-- ROW 2: Opening Date & Opening Time -->
-          <div class="form-group" style="min-width: 0;">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Opening Date <span style="color: #f87171;">*</span>
-            </label>
-            <input type="date" name="start_date" value="<?= date('Y-m-d', strtotime($survey['start_date'])) ?>" required style="height: 44px; width: 100%; box-sizing: border-box; cursor: pointer; font-weight: 500; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+          <div class="form-group">
+            <label>Opening Date <span style="color: #f87171;">*</span></label>
+            <input type="date" name="start_date" id="setStartDate" required>
           </div>
-
-          <div class="form-group" style="min-width: 0;">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Opening Time <span style="color: #f87171;">*</span>
-            </label>
-            <input type="time" name="start_time" value="<?= date('H:i', strtotime($survey['start_date'])) ?>" required style="height: 44px; width: 100%; box-sizing: border-box; cursor: pointer; font-weight: 500; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+          <div class="form-group">
+            <label>Opening Time <span style="color: #f87171;">*</span></label>
+            <input type="time" name="start_time" id="setStartTime" required>
           </div>
-
-          <!-- ROW 3: Closing Date & Closing Time -->
-          <div class="form-group" style="min-width: 0;">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Closing Date <span style="color: #f87171;">*</span>
-            </label>
-            <input type="date" name="end_date" value="<?= date('Y-m-d', strtotime($survey['end_date'])) ?>" required style="height: 44px; width: 100%; box-sizing: border-box; cursor: pointer; font-weight: 500; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+          <div class="form-group">
+            <label>Closing Date <span style="color: #f87171;">*</span></label>
+            <input type="date" name="end_date" id="setEndDate" required>
           </div>
-
-          <div class="form-group" style="min-width: 0;">
-            <label style="font-size: 0.84rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem; display: block;">
-              Closing Time <span style="color: #f87171;">*</span>
-            </label>
-            <input type="time" name="end_time" value="<?= date('H:i', strtotime($survey['end_date'])) ?>" required style="height: 44px; width: 100%; box-sizing: border-box; cursor: pointer; font-weight: 500; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-main);">
+          <div class="form-group">
+            <label>Closing Time <span style="color: #f87171;">*</span></label>
+            <input type="time" name="end_time" id="setEndTime" required>
           </div>
         </div>
-
-        <!-- BOTTOM: Save Changes aligned to the bottom-right -->
-        <div style="display: flex; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1.15rem; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-          <button type="button" class="btn btn-primary" onclick="promptConfirmEditSurveySettings()" style="padding: 9px 24px; font-weight: 700; border-radius: 8px;">
-            <i class="fa-solid fa-floppy-disk me-1"></i> Save Changes
-          </button>
+        <div style="margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--bg-card-border); display: flex; justify-content: flex-end;">
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i> Save Changes</button>
         </div>
       </form>
     </div>
-
   </div>
-
-</div>
-
-<?php if (!$isPublished): ?>
-<!-- =========================================================
-     MODAL 1: ADD QUESTION MODAL (SET A UI MATCHED)
-     ========================================================= -->
-<div id="addQuestionModal" class="modal-overlay hidden add-question-modal">
+  <div id="addQuestionModal" class="modal-overlay hidden add-question-modal">
   <div class="modal-card add-question-card">
     <div class="modal-header">
       <h3 style="color: var(--text-main);"><i class="fa-solid fa-plus" style="color: var(--primary-teal);"></i> Add Question to Survey</h3>
     </div>
-    <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST" id="addQuestionForm">
-      <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <form id="addQuestionForm">
+      <input type="hidden" name="csrf_token" value="">
       <input type="hidden" name="action" value="add_question">
       <input type="hidden" name="survey_id" value="<?= $surveyId ?>">
 
@@ -1663,7 +594,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     </form>
   </div>
 </div>
-<?php endif; ?>
+</div>
 
 <?php if (!$isPublished): ?>
 <!-- =========================================================
@@ -1674,8 +605,8 @@ require_once __DIR__ . '/../pages/header_staff.php';
     <div class="modal-header">
       <h3 style="color: var(--text-main);"><i class="fa-solid fa-pen-to-square" style="color: var(--primary-teal);"></i> Edit Question</h3>
     </div>
-    <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST" id="editQuestionForm">
-      <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <form id="editQuestionForm">
+      <input type="hidden" name="csrf_token" value="">
       <input type="hidden" name="action" value="edit_question">
       <input type="hidden" name="survey_id" value="<?= $surveyId ?>">
       <input type="hidden" name="question_id" id="editQuestionId" value="">
@@ -1728,8 +659,8 @@ require_once __DIR__ . '/../pages/header_staff.php';
     <div class="modal-header">
       <h3 style="color: #ef4444;"><i class="fa-solid fa-trash-can" style="color: #ef4444;"></i> Delete Question</h3>
     </div>
-    <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST">
-      <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <form>
+      <input type="hidden" name="csrf_token" value="">
       <input type="hidden" name="action" value="delete_question">
       <input type="hidden" name="survey_id" value="<?= $surveyId ?>">
       <input type="hidden" name="question_id" id="deleteQuestionId" value="">
@@ -1790,13 +721,13 @@ require_once __DIR__ . '/../pages/header_staff.php';
     <div class="modal-header">
       <h3 style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation" style="color: #ef4444;"></i> Delete Survey</h3>
     </div>
-    <form action="survey_questions.php?id=<?= $surveyId ?>" method="POST">
-      <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <form>
+      <input type="hidden" name="csrf_token" value="">
       <input type="hidden" name="action" value="delete_survey">
 
       <div class="modal-body">
         <p style="color: var(--text-main); font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.75rem;">
-          Are you sure you want to permanently delete <strong><?= e($survey['title']) ?></strong>?
+          Are you sure you want to permanently delete <strong><span id="surveyTitleDisp">Loading...</span></strong>?
         </p>
         <p style="color: #f87171; font-size: 0.85rem; margin: 0; background: rgba(239, 68, 68, 0.12); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
           <i class="fa-solid fa-triangle-exclamation me-1"></i>
@@ -2269,5 +1200,6 @@ function promptConfirmEditSurveySettings() {
 }
 </script>
 
+<script src="survey_questions_app.js" type="module"></script>
 <?php require_once __DIR__ . '/../pages/footer_staff.php'; ?>
 

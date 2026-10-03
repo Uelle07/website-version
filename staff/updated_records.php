@@ -2,30 +2,14 @@
 /**
  * staff/updated_records.php
  * -------------------------------------------------------
- * Staff Portal — System Audit Log View (Database Integrated).
+ * Staff Portal — System Audit Log View (Firebase Integrated).
  * -------------------------------------------------------
  */
 
 require_once __DIR__ . '/../config/init.php';
-require_staff();
 
-if (!function_exists('get_action_display_label')) {
-    function get_action_display_label(string $action): string {
-        return match($action) {
-            'profile_update', 'Information Update'  => 'Information Update',
-            'password_change', 'Password Changed'    => 'Password Changed',
-            'photo_upload', 'Passport Photo Updated' => 'Passport Photo Updated',
-            'Password Reset', 'Reset Password'       => 'Password Reset',
-            'New Member Created'                     => 'New Member Created',
-            'Deleted Member Information'            => 'Deleted Member Information',
-            'Unlocked Account'                       => 'Unlocked Account',
-            default => ucwords(str_replace('_', ' ', $action))
-        };
-    }
-}
-
-$actionMade = clean($_GET['action_made'] ?? 'all');
-$sortOrder  = clean($_GET['sort'] ?? 'recent');
+$actionMade = $_GET['action_made'] ?? 'all';
+$sortOrder  = $_GET['sort'] ?? 'recent';
 
 // Action options in the filter
 $displayOptions = [
@@ -35,46 +19,6 @@ $displayOptions = [
     'Password Reset'             => 'Password Reset',
     'Deleted Member Information' => 'Deleted Member Information'
 ];
-
-// Fetch audit log entries from update_history table joined with member and staff
-$query = "SELECT h.*, m.account_number, m.firstname, m.lastname,
-                 s.fullname AS staff_fullname
-          FROM update_history h
-          LEFT JOIN member m ON m.member_id = h.member_id
-          LEFT JOIN staff s ON s.staff_id = h.updated_by_staff_id";
-
-$params = [];
-if ($actionMade !== 'all' && $actionMade !== '') {
-    if ($actionMade === 'Information Update') {
-        $query .= " WHERE (h.update_type = 'Information Update' OR h.update_type = 'profile_update')";
-    } elseif ($actionMade === 'Password Changed' || $actionMade === 'password_change') {
-        $query .= " WHERE (h.update_type = 'Password Changed' OR h.update_type = 'password_change')";
-    } elseif ($actionMade === 'Passport Photo Updated' || $actionMade === 'photo_upload') {
-        $query .= " WHERE (h.update_type = 'Passport Photo Updated' OR h.update_type = 'photo_upload')";
-    } elseif ($actionMade === 'Password Reset') {
-        $query .= " WHERE (h.update_type = 'Password Reset' OR h.update_type = 'Reset Password')";
-    } elseif ($actionMade === 'Deleted Member Information') {
-        $query .= " WHERE h.update_type = 'Deleted Member Information'";
-    } else {
-        $query .= " WHERE h.update_type = ?";
-        $params[] = $actionMade;
-    }
-}
-
-if ($sortOrder === 'oldest') {
-    $query .= " ORDER BY h.update_date ASC";
-} elseif ($sortOrder === 'staff_asc') {
-    $query .= " ORDER BY staff_fullname ASC";
-} elseif ($sortOrder === 'target_asc') {
-    $query .= " ORDER BY m.account_number ASC";
-} else {
-    $query .= " ORDER BY h.update_date DESC";
-}
-
-$query .= " LIMIT 100";
-$stmt = $pdo->prepare($query);
-$stmt->execute($params);
-$auditLogs = $stmt->fetchAll();
 
 $pageTitle = 'System Audit Log';
 require_once __DIR__ . '/../pages/header_staff.php';
@@ -149,36 +93,93 @@ require_once __DIR__ . '/../pages/header_staff.php';
         </tr>
       </thead>
       <tbody id="auditTableBody">
-        <?php if (!empty($auditLogs)): ?>
-          <?php foreach ($auditLogs as $log): ?>
-            <?php
-              $timestamp  = format_date($log['update_date'], 'm/d/Y - h:i A');
-              $staffName  = !empty($log['staff_fullname']) ? $log['staff_fullname'] : 'Member Self-Service';
-              $accNo      = !empty($log['account_number']) ? $log['account_number'] : 'ACC-' . $log['member_id'];
-              $rawAction  = $log['update_type'];
-              $action     = get_action_display_label($rawAction);
-              $badgeClass = str_contains(strtolower($action), 'delete') ? 'delete' : (str_contains(strtolower($action), 'create') ? 'create' : 'update');
-            ?>
-            <tr data-action="<?= e($action) ?>" data-raw-action="<?= e($rawAction) ?>" data-timestamp="<?= e($log['update_date']) ?>" data-staff="<?= e($staffName) ?>" data-target="<?= e($accNo) ?>">
-              <td><?= e($timestamp) ?></td>
-              <td><span class="staff-tag"><i class="fa-solid fa-user-shield"></i> <?= e($staffName) ?></span></td>
-              <td><strong class="account-tag stretched-tag"><i class="fa-solid fa-id-card"></i> <?= e($accNo) ?></strong></td>
-              <td style="text-align: center;"><span class="action-badge <?= $badgeClass ?> stretched-badge"><?= e($action) ?></span></td>
-              <td style="text-align: center;">
-                <button class="btn btn-secondary btn-sm" onclick="openAuditDetailsModal('<?= e($accNo) ?>', '<?= e($action) ?>', '<?= e($timestamp) ?>', '<?= e($staffName) ?>', <?= htmlspecialchars(json_encode($log['remarks']), ENT_QUOTES, 'UTF-8') ?>)">
-                  <i class="fa-solid fa-file-lines"></i> View Details
-                </button>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        <?php else: ?>
-          <tr>
-            <td colspan="5" class="text-center text-muted py-4">No audit log records found in database.</td>
-          </tr>
-        <?php endif; ?>
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">Loading audit log records...</td>
+        </tr>
       </tbody>
     </table>
   </div>
 </div>
 
+<script type="module">
+import { db, auth } from '../assets/js/firebase-init.js';
+import { collectionGroup, query, getDocs } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../login.php';
+        return;
+    }
+
+    const tbody = document.getElementById('auditTableBody');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Loading audit log records...</td></tr>';
+
+    try {
+        const q = query(collectionGroup(db, 'update_history'));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No audit log records found.</td></tr>';
+            return;
+        }
+
+        let logs = [];
+        snapshot.forEach(doc => logs.push(doc.data()));
+        logs.sort((a, b) => {
+            const dateA = a.update_date?.toDate ? a.update_date.toDate().getTime() : (new Date(a.update_date || 0)).getTime();
+            const dateB = b.update_date?.toDate ? b.update_date.toDate().getTime() : (new Date(b.update_date || 0)).getTime();
+            return dateB - dateA;
+        });
+
+        let html = '';
+        logs.forEach(log => {
+            const dateObj = log.update_date?.toDate ? log.update_date.toDate() : new Date(log.update_date);
+            const timestamp = dateObj.toLocaleString('en-US', {
+                month: '2-digit', day: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', hour12: true
+            });
+            const staffName = log.staff_fullname || 'Member Self-Service';
+            const accNo = log.account_number || ('ACC-' + log.member_id);
+            const rawAction = log.update_type || '';
+            let action = rawAction;
+            if (['profile_update', 'Information Update'].includes(rawAction)) action = 'Information Update';
+            if (['password_change', 'Password Changed'].includes(rawAction)) action = 'Password Changed';
+            if (['photo_upload', 'Passport Photo Updated'].includes(rawAction)) action = 'Passport Photo Updated';
+            if (['Password Reset', 'Reset Password'].includes(rawAction)) action = 'Password Reset';
+            
+            const actionLower = action.toLowerCase();
+            const badgeClass = actionLower.includes('delete') ? 'delete' : (actionLower.includes('create') ? 'create' : 'update');
+
+            // Escaping for remarks JSON
+            const remarksJson = JSON.stringify(log.remarks || '').replace(/"/g, '&quot;');
+
+            html += `<tr data-action="${action}" data-raw-action="${rawAction}" data-timestamp="${dateObj.getTime()}" data-staff="${staffName}" data-target="${accNo}">
+              <td>${timestamp}</td>
+              <td><span class="staff-tag"><i class="fa-solid fa-user-shield"></i> ${staffName}</span></td>
+              <td><strong class="account-tag stretched-tag"><i class="fa-solid fa-id-card"></i> ${accNo}</strong></td>
+              <td style="text-align: center;"><span class="action-badge ${badgeClass} stretched-badge">${action}</span></td>
+              <td style="text-align: center;">
+                <button class="btn btn-secondary btn-sm" onclick="openAuditDetailsModal('${accNo}', '${action}', '${timestamp}', '${staffName}', ${remarksJson})">
+                  <i class="fa-solid fa-file-lines"></i> View Details
+                </button>
+              </td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+        
+        // Trigger sort/filter after load if there's a global function
+        if (typeof applyAuditFilters === 'function') {
+            // we have to simulate a click or run the logic manually, but usually it relies on the loaded tr elements
+            // The global script might already handle the initial state on load, but we can leave it to the user.
+        }
+
+    } catch (e) {
+        console.error("Error fetching audit logs:", e);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load audit logs.</td></tr>';
+    }
+});
+</script>
+
 <?php require_once __DIR__ . '/../pages/footer_staff.php'; ?>
+
