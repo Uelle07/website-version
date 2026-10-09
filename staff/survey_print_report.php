@@ -396,7 +396,7 @@ if (!empty($_SERVER['HTTP_REFERER'])) {
 
             questions.forEach((q, index) => {
                 const qId = q.id;
-                const qType = q.question_type;
+                const qType = q.type;
                 const qChoices = choicesByQuestion[qId] || [];
                 
                 let printTypeDisplay = 'Multiple Choice';
@@ -546,5 +546,6 @@ if (!empty($_SERVER['HTTP_REFERER'])) {
   </script>
 </body>
 </html>
+
 
 

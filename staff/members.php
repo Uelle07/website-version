@@ -49,7 +49,6 @@ require_once __DIR__ . '/../pages/header_staff.php';
               <option value="all">All Registered Records</option>
               <option value="active">Active Accounts Only</option>
               <option value="inactive">Inactive Accounts Only</option>
-              <option value="flagged">Flagged Accounts Only</option>
             </select>
           </div>
 
@@ -199,14 +198,31 @@ async function loadMembersData() {
                 `<img src="${photoSrc}" alt="Photo" class="table-avatar-thumb">` : 
                 `<i class="fa-solid fa-image"></i>`;
 
-            let actionBtns = `
-                <button type="button" class="icon-btn btn-view-dynamic" title="View Profile" aria-label="View profile for ${accNo}" onclick="viewMember('${accNo}')"><i class="fa-solid fa-eye"></i></button>
-                <button type="button" class="icon-btn btn-edit-dynamic" title="Edit Member" aria-label="Edit member information for ${accNo}" onclick="openEditMember('${accNo}')"><i class="fa-solid fa-pen"></i></button>
-                <button type="button" class="icon-btn btn-print-dynamic" title="Print Member Record" aria-label="Print record for ${accNo}" onclick="printMemberRecord('${accNo}')"><i class="fa-solid fa-print"></i></button>
-                <button type="button" class="icon-btn btn-download-dynamic" title="Download Record (PDF / Word)" aria-label="Download document for ${accNo}" onclick="openDownloadMemberModal('${accNo}')"><i class="fa-solid fa-file-arrow-down"></i></button>
-            `;
+            let actionBtns = '';
             if (status.toLowerCase() !== 'inactive') {
-                actionBtns += `<button type="button" class="icon-btn btn-delete-dynamic" title="Delete Member" aria-label="Delete member ${accNo}" onclick="openDeleteMember('${accNo}')"><i class="fa-solid fa-trash"></i></button>`;
+                actionBtns = `
+                    <button type="button" class="icon-btn btn-view-dynamic" title="View Profile" aria-label="View profile for ${accNo}" onclick="viewMember('${accNo}')"><i class="fa-solid fa-eye"></i></button>
+                    <button type="button" class="icon-btn btn-edit-dynamic" title="Edit Member" aria-label="Edit member information for ${accNo}" onclick="openEditMember('${accNo}')"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" class="icon-btn btn-print-dynamic" title="Print Member Record" aria-label="Print record for ${accNo}" onclick="printMemberRecord('${accNo}')"><i class="fa-solid fa-print"></i></button>
+                    <button type="button" class="icon-btn btn-download-dynamic" title="Download Record (PDF / Word)" aria-label="Download document for ${accNo}" onclick="openDownloadMemberModal('${accNo}')"><i class="fa-solid fa-file-arrow-down"></i></button>
+                    <button type="button" class="icon-btn btn-delete-dynamic" title="Delete Member" aria-label="Delete member ${accNo}" onclick="openDeleteMember('${accNo}')"><i class="fa-solid fa-trash"></i></button>
+                `;
+            } else {
+                let fallbackDate = m.deleted_at ? (m.deleted_at.toDate ? m.deleted_at.toDate() : new Date(m.deleted_at)) : (m.updated_at ? (m.updated_at.toDate ? m.updated_at.toDate() : new Date(m.updated_at)) : new Date());
+                let msSinceDelete = Date.now() - fallbackDate.getTime();
+                let daysSinceDelete = Math.floor(msSinceDelete / (1000 * 3600 * 24));
+                let daysLeft = 30 - daysSinceDelete;
+                if (daysLeft <= 0) return; // Permanently deleted from the list
+                actionBtns = `
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 0.85rem;">
+                        <span style="font-size: 0.72rem; color: #f87171; font-weight: 700; padding: 0.35rem 0.65rem; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.25); border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+                            <i class="fa-regular fa-clock" style="margin-right: 0.3rem;"></i> ${daysLeft} Days Left
+                        </span>
+                        <button type="button" class="btn" style="color: #fef08a; border: 1px solid rgba(254, 240, 138, 0.4); background: rgba(254, 240, 138, 0.1); padding: 0.35rem 0.85rem; font-size: 0.8rem; font-weight: 600; border-radius: 8px; box-shadow: 0 0 10px rgba(254,240,138,0.05);" title="Restore Member Account" aria-label="Restore member ${accNo}" onclick="window.openRestoreMember('${accNo}')">
+                            <i class="fa-solid fa-rotate-left" style="margin-right: 0.4rem;"></i> Restore
+                        </button>
+                    </div>
+                `;
             }
 
             tbody.innerHTML += `

@@ -42,7 +42,8 @@ $accNo = $_POST['account_number'] ?? '';
                     const memberDoc = snapshot.docs[0];
                     if (memberDoc.data().account_status !== 'Inactive') {
                         await updateDoc(doc(db, 'member', memberDoc.id), {
-                            account_status: 'Inactive'
+                            account_status: 'Inactive',
+                            deleted_at: new Date().toISOString()
                         });
                         alert('Member record ' + accNo + ' removed and labeled as Inactive.');
                     } else {

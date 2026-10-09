@@ -492,7 +492,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     </div>
   </div>
   <div id="tabSettingsContent" style="display: none;">
-    <div class="table-card" style="margin-top: 0; padding: 1.85rem 2rem; max-width: 800px; margin-bottom: 2rem;">
+    <div class="table-card" style="margin-top: 0; padding: 1.85rem 2rem; max-width: 1000px; margin: 0 auto 2rem auto;">
       <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 1.25rem;"><i class="fa-solid fa-sliders text-cyan me-2"></i> Survey Settings</h3>
       <form id="editSettingsForm">
         <div class="form-grid">
@@ -873,12 +873,12 @@ function openAddQuestionModal() {
 function openEditQuestionModal(question, choices) {
   document.getElementById('editQuestionId').value = question.question_id;
   document.getElementById('editQuestionText').value = question.question;
-  document.getElementById('editQuestionType').value = question.question_type;
+  document.getElementById('editQuestionType').value = question.type;
 
   const rows = document.getElementById('editChoiceRows');
   rows.innerHTML = '';
 
-  if (question.question_type === 'multiple_choice' && choices && choices.length > 0) {
+  if (question.type === 'multiple_choice' && choices && choices.length > 0) {
     choices.forEach((c, idx) => {
       const row = document.createElement('div');
       row.style.display = 'flex';
@@ -1202,4 +1202,6 @@ function promptConfirmEditSurveySettings() {
 
 <script src="survey_questions_app.js" type="module"></script>
 <?php require_once __DIR__ . '/../pages/footer_staff.php'; ?>
+
+
 

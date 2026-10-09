@@ -1199,3 +1199,27 @@ auth.onAuthStateChanged(async (user) => {
     </div>
   </div>
 
+
+  <!-- Restore Member Confirmation Modal -->
+  <div id="restoreModal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-rotate-left" style="color: #4ade80;"></i> Restore Member Record</h3>
+      </div>
+      <form id="restoreMemberForm" action="<?= e(BASE_URL) ?>/staff/restore_member.php" method="POST">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" id="restoreAccNoHidden" name="account_number">
+        <p style="color: var(--text-main); font-size: 0.95rem; margin-bottom: 0.5rem;">
+          Are you sure you truly want to restore <strong id="restoreTargetName" style="color: #4ade80;">this member</strong> (<span id="restoreTargetAcc"></span>)?
+        </p>
+        <p style="color: #94a3b8; font-size: 0.85rem;">
+          This action will restore the member to the portal and set their account status back to Active. All Action buttons will return.
+        </p>
+        <div class="modal-actions" style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('restoreModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="background-color: #4ade80; border-color: #4ade80; color: #fff;"><i class="fa-solid fa-rotate-left"></i> Confirm</button>
+        </div>
+      </form>
+    </div>
+  </div>
+

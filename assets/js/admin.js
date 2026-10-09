@@ -1026,6 +1026,17 @@ function executeEditMemberSubmit() {
 }
 
 // ================= 9. DELETE MEMBER WORKFLOW =================
+window.openRestoreMember = function(accNo) {
+  const data = window.membersDatabase[accNo] || { fullName: 'Member' };
+  const accHidden = document.getElementById('restoreAccNoHidden');
+  if (accHidden) accHidden.value = accNo;
+  const targetAcc = document.getElementById('restoreTargetAcc');
+  if (targetAcc) targetAcc.innerText = accNo;
+  const targetName = document.getElementById('restoreTargetName');
+  if (targetName) targetName.innerText = data.fullName || data.name || accNo;
+  openModal('restoreModal');
+}
+
 function openDeleteMember(accNo) {
   const data = window.membersDatabase[accNo] || { fullName: 'Member' };
   const accHidden = document.getElementById('deleteAccNoHidden');
@@ -2625,8 +2636,7 @@ function filterMemberRecords() {
     let matchScope = true;
     if (dataScope === 'inactive') {
       matchScope = (rowStatus === 'inactive' || rowStatus === 'deleted');
-    } else if (dataScope === 'flagged') {
-      matchScope = (rowStatus === 'flagged');
+   
     } else if (dataScope === 'active') {
       matchScope = (rowStatus === 'active');
     } else {
@@ -3386,4 +3396,6 @@ if (typeof window.Cosmic3DStarfield === 'undefined') {
   }
   };
 }
+
+
 

@@ -194,7 +194,7 @@ require_once __DIR__ . '/../pages/header.php';
                 
                 let inputsHtml = '';
 
-                if (q.question_type === 'multiple_choice') {
+                if (q.type === 'multiple_choice') {
                     inputsHtml = '<div style="display: flex; flex-direction: column; gap: 0.65rem;">';
                     choices.forEach(c => {
                         inputsHtml += `
@@ -206,7 +206,7 @@ require_once __DIR__ . '/../pages/header.php';
                         </label>`;
                     });
                     inputsHtml += '</div>';
-                } else if (q.question_type === 'yes_no') {
+                } else if (q.type === 'yes_no') {
                     inputsHtml = '<div class="row g-3">';
                     choices.forEach(c => {
                         const isYes = c.choice_text.toLowerCase().includes('yes');
@@ -223,7 +223,7 @@ require_once __DIR__ . '/../pages/header.php';
                         </div>`;
                     });
                     inputsHtml += '</div>';
-                } else if (q.question_type === 'rating') {
+                } else if (q.type === 'rating') {
                     inputsHtml = '<div class="row g-2">';
                     choices.forEach(c => {
                         inputsHtml += `
@@ -240,7 +240,7 @@ require_once __DIR__ . '/../pages/header.php';
                         </div>`;
                     });
                     inputsHtml += '</div>';
-                } else if (q.question_type === 'short_answer') {
+                } else if (q.type === 'short_answer') {
                     inputsHtml = `
                     <div class="form-group">
                         <textarea name="ans_${q.id}" class="form-control" rows="4" placeholder="Type your answer here..." style="background: var(--input-bg); color: var(--text-main); border: 1px solid var(--bg-card-border); border-radius: 10px; padding: 12px 14px; font-size: 0.95rem;" required></textarea>
@@ -276,7 +276,7 @@ require_once __DIR__ . '/../pages/header.php';
 
                 questions.forEach((q, index) => {
                     const qNumber = index + 1;
-                    if (q.question_type === 'short_answer') {
+                    if (q.type === 'short_answer') {
                         const val = form.elements['ans_' + q.id].value.trim();
                         if (!val) {
                             errors.push(`Please provide an answer for Question #${qNumber}.`);
@@ -381,4 +381,5 @@ require_once __DIR__ . '/../pages/header.php';
 </script>
 
 <?php require_once __DIR__ . '/../pages/footer.php'; ?>
+
 
