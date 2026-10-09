@@ -505,28 +505,10 @@ onAuthStateChanged(auth, async (user) => {
 
         // Fetch related data
         let accountData = {};
-        const accDoc = await getDoc(doc(db, 'member_account', memberId));
-        if (accDoc.exists()) accountData = accDoc.data();
-
-        let spouseData = {};
-        const spouseQ = query(collection(db, 'spouse'), where('member_id', '==', memberId));
-        const spouseQs = await getDocs(spouseQ);
-        if (!spouseQs.empty) spouseData = spouseQs.docs[0].data();
-
-        let parentsData = {};
-        const parentsQ = query(collection(db, 'parents'), where('member_id', '==', memberId));
-        const parentsQs = await getDocs(parentsQ);
-        if (!parentsQs.empty) parentsData = parentsQs.docs[0].data();
-
-        let children = [];
-        const childrenQ = query(collection(db, 'children'), where('member_id', '==', memberId));
-        const childrenQs = await getDocs(childrenQ);
-        childrenQs.forEach(doc => { children.push(doc.data()); });
-
-        let references = [];
-        const refQ = query(collection(db, 'member_references'), where('member_id', '==', memberId));
-        const refQs = await getDocs(refQ);
-        refQs.forEach(doc => { references.push(doc.data()); });
+        let spouseData = { spouse_name: memberData.spouse_name || (memberData.spouse && memberData.spouse.name) || 'Not Specified', occupation: memberData.spouse_occupation || (memberData.spouse && memberData.spouse.occupation) || 'Not Specified', employer: memberData.spouse_employer || (memberData.spouse && memberData.spouse.employer) || 'Not Specified' };
+        let parentsData = { father_name: memberData.father_name || 'Not Specified', mother_name: memberData.mother_name || 'Not Specified' };
+        let children = Array.isArray(memberData.children) ? memberData.children : (memberData.childrenList || []);
+        let references = Array.isArray(memberData.references) ? memberData.references.map(r => typeof r === 'string' ? { reference_member_name: r } : r) : [];
 
         // Basic Info Formatting
         let fullName = escapeHtml((memberData.firstname || '') + ' ' + (memberData.middlename ? memberData.middlename.charAt(0) + '. ' : '') + (memberData.lastname || ''));
@@ -560,7 +542,7 @@ onAuthStateChanged(auth, async (user) => {
         document.getElementById('profNationality').innerText = escapeHtml(memberData.nationality || 'Filipino');
         document.getElementById('profSex').innerText = escapeHtml(memberData.sex || 'Not Specified');
         document.getElementById('profContact').innerText = escapeHtml(memberData.contact_number || 'Not Specified');
-        document.getElementById('profUsername').innerText = escapeHtml(accountData.username || memberData.email || 'N/A');
+        document.getElementById('profUsername').innerText = escapeHtml(memberData.account_number || memberId || 'N/A');
         document.getElementById('profCivil').innerText = escapeHtml(memberData.civil_status || 'Single');
         document.getElementById('profAddress').innerText = escapeHtml(memberData.address || 'Not Specified');
 
@@ -651,7 +633,7 @@ onAuthStateChanged(auth, async (user) => {
             sex: memberData.sex || 'Not Specified',
             nationality: memberData.nationality || 'Filipino',
             contact: memberData.contact_number || 'Not Specified',
-            email: accountData.username || memberData.email || 'N/A',
+            email: memberData.account_number || memberId || 'N/A',
             address: memberData.address || 'Not Specified',
             occ: memberData.occupation || 'None',
             emp: memberData.employer || 'None',
