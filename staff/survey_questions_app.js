@@ -180,6 +180,16 @@ function escapeHtml(unsafe) {
     return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+function normalizeQuestionType(type) {
+    if (!type) return 'short_answer';
+    const t = type.toString().toLowerCase().trim();
+    if (t === 'multiple_choice' || t === 'mcq' || t === 'choice' || t === 'single_choice') return 'multiple_choice';
+    if (t === 'yes_no' || t === 'yesno' || t === 'boolean' || t === 'yes_or_no') return 'yes_no';
+    if (t === 'rating' || t === 'scale' || t === 'rating_scale' || t === 'scale_1_5' || t === 'scale_of_1_to_5') return 'rating';
+    if (t === 'short_answer' || t === 'description' || t === 'open_ended' || t === 'text' || t === 'paragraph' || t === 'long_answer') return 'short_answer';
+    return t;
+}
+
 function renderQuestions() {
     const container = document.getElementById('questionsListContainer');
     if (!container) return;
@@ -197,11 +207,12 @@ function renderQuestions() {
     let html = '<div style="display: flex; flex-direction: column; gap: 1.15rem; margin-bottom: 2.5rem;">';
     
     questionsData.forEach((q, idx) => {
+        const normType = normalizeQuestionType(q.type);
         let typeBadge = '';
-        if (q.type === 'multiple_choice') typeBadge = '<span class="status-pill" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8;"><i class="fa-solid fa-circle-dot"></i> Multiple Choice</span>';
-        else if (q.type === 'yes_no') typeBadge = '<span class="status-pill status-active"><i class="fa-solid fa-thumbs-up"></i> Yes/No</span>';
-        else if (q.type === 'rating') typeBadge = '<span class="status-pill status-default"><i class="fa-solid fa-star"></i> Rating Scale (1-5)</span>';
-        else if (q.type === 'short_answer') typeBadge = '<span class="status-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc;"><i class="fa-solid fa-paragraph"></i> Description Type Answer</span>';
+        if (normType === 'multiple_choice') typeBadge = '<span class="status-pill" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8;"><i class="fa-solid fa-circle-dot"></i> Multiple Choice</span>';
+        else if (normType === 'yes_no') typeBadge = '<span class="status-pill status-active"><i class="fa-solid fa-thumbs-up"></i> Yes/No</span>';
+        else if (normType === 'rating') typeBadge = '<span class="status-pill status-default"><i class="fa-solid fa-star"></i> Rating Scale (1-5)</span>';
+        else if (normType === 'short_answer') typeBadge = '<span class="status-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc;"><i class="fa-solid fa-paragraph"></i> Description Type Answer</span>';
         
         let qChoices = choicesData.filter(c => c.question_id === q.id);
         
@@ -221,7 +232,7 @@ function renderQuestions() {
               <div style="font-size: 0.74rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.55rem;">Configured Choices (${qChoices.length}):</div>
               <div style="display: flex; flex-wrap: wrap; gap: 0.55rem;">${chHtml}</div>
             </div>`;
-        } else if (q.type === 'short_answer') {
+        } else if (normType === 'short_answer') {
             bodyHtml = `<div style="color: var(--text-dim); font-size: 0.82rem; font-style: italic; margin-top: 0.35rem;"><i class="fa-solid fa-pen-fancy me-1" style="color: var(--primary-teal);"></i> Open-ended text field response.</div>`;
         }
         
@@ -275,16 +286,16 @@ function renderSummary() {
         questionsData.forEach((q, idx) => {
             const qResps = responsesData.filter(r => r.question_id === q.id);
             const qTotal = qResps.length;
+            const normType = normalizeQuestionType(q.type);
             
-            let typeDisplay = q.type;
-            let typePillStyle = '';
-            if (q.type === 'multiple_choice') { typeDisplay = 'Multiple Choice'; typePillStyle = 'background: rgba(56, 189, 248, 0.15); color: #38bdf8;'; }
-            if (q.type === 'yes_no') { typeDisplay = 'Yes/No'; typePillStyle = 'background: rgba(16, 185, 129, 0.15); color: #34d399;'; }
-            if (q.type === 'rating') { typeDisplay = 'Rating Scale'; typePillStyle = 'background: rgba(245, 158, 11, 0.15); color: #fbbf24;'; }
-            if (q.type === 'short_answer') { typeDisplay = 'Description Type Answer'; typePillStyle = 'background: rgba(168, 85, 247, 0.15); color: #c084fc;'; }
+            let typeDisplay = 'Description Type Answer';
+            let typePillStyle = 'background: rgba(168, 85, 247, 0.15); color: #c084fc;';
+            if (normType === 'multiple_choice') { typeDisplay = 'Multiple Choice'; typePillStyle = 'background: rgba(56, 189, 248, 0.15); color: #38bdf8;'; }
+            if (normType === 'yes_no') { typeDisplay = 'Yes/No'; typePillStyle = 'background: rgba(16, 185, 129, 0.15); color: #34d399;'; }
+            if (normType === 'rating') { typeDisplay = 'Rating Scale'; typePillStyle = 'background: rgba(245, 158, 11, 0.15); color: #fbbf24;'; }
             
             let insightsHtml = '';
-            if (q.type === 'short_answer') {
+            if (normType === 'short_answer') {
                 const pct = totalResp > 0 ? ((qTotal / totalResp) * 100).toFixed(1) : 0;
                 insightsHtml = `<div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.5rem 0.75rem; background: rgba(168, 85, 247, 0.08); border-radius: 8px;">
                   <i class="fa-solid fa-pen-nib" style="color: #c084fc;"></i>
@@ -338,17 +349,17 @@ function renderQuestionBreakdown() {
     
     let html = '<div style="display: flex; flex-direction: column; gap: 1.25rem;">';
     questionsData.forEach((q, idx) => {
-        let typeDisplay = q.type;
-        if (q.type === 'multiple_choice') typeDisplay = 'Multiple Choice';
-        if (q.type === 'yes_no') typeDisplay = 'Yes/No';
-        if (q.type === 'rating') typeDisplay = 'Rating Scale';
-        if (q.type === 'short_answer') typeDisplay = 'Description Type Answer';
+        const normType = normalizeQuestionType(q.type);
+        let typeDisplay = 'Description Type Answer';
+        if (normType === 'multiple_choice') typeDisplay = 'Multiple Choice';
+        if (normType === 'yes_no') typeDisplay = 'Yes/No';
+        if (normType === 'rating') typeDisplay = 'Rating Scale';
         
         const qResps = responsesData.filter(r => r.question_id === q.id);
         const qTotal = qResps.length;
         
         let bodyHtml = '';
-        if (q.type === 'short_answer') {
+        if (normType === 'short_answer') {
             if (qResps.length === 0) {
                 bodyHtml = `<div class="structured-box text-center py-4" style="color: var(--text-muted);">No text responses submitted yet.</div>`;
             } else {
@@ -451,6 +462,9 @@ function renderSettings() {
     document.getElementById('setSurveyTitle').value = currentSurvey.title;
     document.getElementById('setSurveyStatus').value = currentSurvey.status === 'closed' ? 'inactive' : currentSurvey.status;
     document.getElementById('setSurveyDesc').value = currentSurvey.description || '';
+    if (document.getElementById('setSurveyInstructions')) {
+        document.getElementById('setSurveyInstructions').value = currentSurvey.instructions || '';
+    }
     if (currentSurvey.start_date) {
         const d = new Date(currentSurvey.start_date);
         document.getElementById('setStartDate').value = d.toISOString().split('T')[0];
@@ -469,13 +483,17 @@ document.getElementById('editSettingsForm').addEventListener('submit', async (e)
         const title = document.getElementById('setSurveyTitle').value.trim();
         const status = document.getElementById('setSurveyStatus').value;
         const description = document.getElementById('setSurveyDesc').value.trim();
+        let instructions = '';
+        if (document.getElementById('setSurveyInstructions')) {
+            instructions = document.getElementById('setSurveyInstructions').value.trim();
+        }
         const sd = document.getElementById('setStartDate').value;
         const st = document.getElementById('setStartTime').value;
         const ed = document.getElementById('setEndDate').value;
         const et = document.getElementById('setEndTime').value;
         
         await updateDoc(doc(db, 'surveys', surveyId), {
-            title, status, description,
+            title, status, description, instructions,
             start_date: `${sd}T${st}:00`,
             end_date: `${ed}T${et}:00`
         });
@@ -520,14 +538,15 @@ window.openEditQuestionModal = function(qId) {
     const q = questionsData.find(x => x.id === qId);
     if (!q) return;
     
+    const normType = normalizeQuestionType(q.type);
     document.getElementById('editQuestionId').value = q.id;
     document.getElementById('editQuestionText').value = q.question;
-    document.getElementById('editQuestionType').value = q.type;
+    document.getElementById('editQuestionType').value = normType;
     
     const rows = document.getElementById('editChoiceRows');
     if (rows) {
         rows.innerHTML = '';
-        if (q.type === 'multiple_choice') {
+        if (normType === 'multiple_choice') {
             const choices = choicesData.filter(c => c.question_id === qId);
             choices.sort((a, b) => a.choice_order - b.choice_order);
             choices.forEach((c) => {
@@ -566,6 +585,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 choiceInputs.forEach((inp) => {
                     if (inp.value.trim()) choices.push(inp.value.trim());
                 });
+            } else if (type === 'yes_no') {
+                choices = ['Yes', 'No'];
+            } else if (type === 'rating') {
+                choices = ['1 (Poor)', '2 (Fair)', '3 (Good)', '4 (Very Good)', '5 (Excellent)'];
             }
             
             try {
@@ -586,10 +609,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 await setDoc(newQRef, newQ);
                 
-                if (type === 'multiple_choice' && choices.length > 0) {
+                if (choices.length > 0) {
                     for (let i = 0; i < choices.length; i++) {
                         const choiceRef = doc(collection(db, 'survey_choices'));
                         await setDoc(choiceRef, {
+                            survey_id: surveyId,
                             question_id: newQRef.id,
                             choice_text: choices[i],
                             choice_order: i + 1,
@@ -623,6 +647,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 choiceInputs.forEach((inp) => {
                     if (inp.value.trim()) choices.push(inp.value.trim());
                 });
+            } else if (type === 'yes_no') {
+                choices = ['Yes', 'No'];
+            } else if (type === 'rating') {
+                choices = ['1 (Poor)', '2 (Fair)', '3 (Good)', '4 (Very Good)', '5 (Excellent)'];
             }
             
             try {
@@ -633,7 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     updated_at: new Date().toISOString()
                 });
                 
-                if (type === 'multiple_choice') {
+                if (type !== 'short_answer') {
                     const cSnap = choicesData.filter(c => c.question_id === questionId);
                     const batchDel = [];
                     cSnap.forEach(c => batchDel.push(deleteDoc(doc(db, 'survey_choices', c.id))));
@@ -643,6 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         for (let i = 0; i < choices.length; i++) {
                             const choiceRef = doc(collection(db, 'survey_choices'));
                             await setDoc(choiceRef, {
+                                survey_id: surveyId,
                                 question_id: questionId,
                                 choice_text: choices[i],
                                 choice_order: i + 1,

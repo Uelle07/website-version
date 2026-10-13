@@ -1,0 +1,1 @@
+const { initializeApp, cert } = require('firebase-admin/app'); const { getAuth } = require('firebase-admin/auth'); const serviceAccount = require('../firebase-admin-key.json'); initializeApp({ credential: cert(serviceAccount) }); const auth = getAuth(); auth.listUsers().then(result => { result.users.forEach(u => console.log('UID:', u.uid, 'Email:', u.email)); process.exit(0); });

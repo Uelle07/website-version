@@ -396,7 +396,7 @@ if (!empty($_SERVER['HTTP_REFERER'])) {
 
             questions.forEach((q, index) => {
                 const qId = q.id;
-                const qType = q.type;
+                const qType = normalizeQuestionType(q.type);
                 const qChoices = choicesByQuestion[qId] || [];
                 
                 let printTypeDisplay = 'Multiple Choice';
@@ -540,6 +540,16 @@ if (!empty($_SERVER['HTTP_REFERER'])) {
     function escapeHtml(unsafe) {
         if(!unsafe) return '';
         return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function normalizeQuestionType(type) {
+        if (!type) return 'short_answer';
+        const t = type.toString().toLowerCase().trim();
+        if (t === 'multiple_choice' || t === 'mcq' || t === 'choice' || t === 'single_choice') return 'multiple_choice';
+        if (t === 'yes_no' || t === 'yesno' || t === 'boolean' || t === 'yes_or_no') return 'yes_no';
+        if (t === 'rating' || t === 'scale' || t === 'rating_scale' || t === 'scale_1_5' || t === 'scale_of_1_to_5') return 'rating';
+        if (t === 'short_answer' || t === 'description' || t === 'open_ended' || t === 'text' || t === 'paragraph' || t === 'long_answer') return 'short_answer';
+        return t;
     }
 
     loadReport();

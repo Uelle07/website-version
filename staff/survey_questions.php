@@ -509,8 +509,12 @@ require_once __DIR__ . '/../pages/header_staff.php';
             </select>
           </div>
           <div class="form-group full-width">
-            <label>Description / Instructions</label>
-            <textarea name="description" id="setSurveyDesc" rows="3"></textarea>
+            <label>Survey Description</label>
+            <textarea name="description" id="setSurveyDesc" rows="2"></textarea>
+          </div>
+          <div class="form-group full-width">
+            <label>Instructions</label>
+            <textarea name="instructions" id="setSurveyInstructions" rows="3"></textarea>
           </div>
           <div class="form-group">
             <label>Opening Date <span style="color: #f87171;">*</span></label>

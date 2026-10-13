@@ -1,0 +1,6 @@
+# Firebase Admin Key
+firebase-admin-key.json
+config/firebase-admin-key.json
+**/firebase-admin-key.json
+node_modules/
+migration/node_modules/

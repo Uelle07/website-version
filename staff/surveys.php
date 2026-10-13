@@ -244,8 +244,12 @@ require_once __DIR__ . '/../pages/header_staff.php';
           <input type="text" name="title" id="createTitle" placeholder="e.g., 2026 Member Satisfaction Survey" required>
         </div>
         <div class="form-group full-width">
-          <label>Description / Instructions</label>
-          <textarea name="description" id="createDescription" rows="3" placeholder="Explain the purpose of this survey to cooperative members..."></textarea>
+          <label>Survey Description</label>
+          <textarea name="description" id="createDescription" rows="2" placeholder="Explain the purpose of this survey to cooperative members..."></textarea>
+        </div>
+        <div class="form-group full-width">
+          <label>Instructions</label>
+          <textarea name="instructions" id="createInstructions" rows="3" placeholder="Provide instructions for taking the survey..."></textarea>
         </div>
         <div class="form-group">
           <label>Opening Date <span style="color: #f87171;">*</span></label>
@@ -292,8 +296,12 @@ require_once __DIR__ . '/../pages/header_staff.php';
           </select>
         </div>
         <div class="form-group full-width">
-          <label>Description / Instructions</label>
-          <textarea name="description" id="editSurveyDescription" rows="3"></textarea>
+          <label>Survey Description</label>
+          <textarea name="description" id="editSurveyDescription" rows="2"></textarea>
+        </div>
+        <div class="form-group full-width">
+          <label>Instructions</label>
+          <textarea name="instructions" id="editSurveyInstructions" rows="3"></textarea>
         </div>
         <div class="form-group">
           <label>Opening Date <span style="color: #f87171;">*</span></label>
@@ -534,6 +542,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     e.preventDefault();
     const title = document.getElementById('createTitle').value.trim();
     const description = document.getElementById('createDescription').value.trim();
+    const instructions = document.getElementById('createInstructions').value.trim();
     const sDate = document.getElementById('createStartDate').value;
     const sTime = document.getElementById('createStartTime').value;
     const eDate = document.getElementById('createEndDate').value;
@@ -547,6 +556,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
       await setDoc(newSurveyRef, {
         title: title,
         description: description,
+        instructions: instructions,
         start_date: startDateStr,
         end_date: endDateStr,
         status: 'draft',
@@ -569,6 +579,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     document.getElementById('editSurveyId').value = survey.id;
     document.getElementById('editSurveyTitle').value = survey.title;
     document.getElementById('editSurveyDescription').value = survey.description || '';
+    document.getElementById('editSurveyInstructions').value = survey.instructions || '';
     document.getElementById('editSurveyStatus').value = survey.status;
     
     if (survey.start_date) {
@@ -589,6 +600,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
     const id = document.getElementById('editSurveyId').value;
     const title = document.getElementById('editSurveyTitle').value.trim();
     const description = document.getElementById('editSurveyDescription').value.trim();
+    const instructions = document.getElementById('editSurveyInstructions').value.trim();
     const status = document.getElementById('editSurveyStatus').value;
     const sDate = document.getElementById('editSurveyStartDate').value;
     const sTime = document.getElementById('editSurveyStartTime').value;
@@ -602,6 +614,7 @@ require_once __DIR__ . '/../pages/header_staff.php';
       await updateDoc(doc(db, 'surveys', id), {
         title: title,
         description: description,
+        instructions: instructions,
         status: status,
         start_date: startDateStr,
         end_date: endDateStr
